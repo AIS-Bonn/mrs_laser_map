@@ -1,0 +1,15 @@
+scan_filter_chain:
+- name: shadows
+  type: mod_laser_filters/ScanShadowsFilter
+  params:
+    min_angle: 0.5
+    max_angle: 179.5
+    neighbors: 2 
+    window: 1 
+    max_filter_radius: 3.0
+- name: self
+  type: mod_laser_filters/ApproxSelfFilter
+  params:
+    radius: 0.7
+    max_z: 0.5
+    min_z: -0.5

@@ -1,0 +1,19 @@
+filter_frames:
+ - frame_id: "/base_link"
+   radius: 0.5
+# - frame_id: "/front_right_ankle_link"
+#   radius: 0.15
+# - frame_id: "/front_left_ankle_link"
+#   radius: 0.15
+# - frame_id: "/front_right_foot_link"
+#   radius: 0.15
+# - frame_id: "/front_left_foot_link"
+#   radius: 0.15
+# - frame_id: "/left_arm_hand_link"
+#   radius: 0.25
+# - frame_id: "/left_arm_elbow_pitch_link"
+#   radius: 0.25
+# - frame_id: "/right_arm_hand_link"
+#   radius: 0.25
+# - frame_id: "/right_arm_elbow_pitch_link"
+#   radius: 0.25

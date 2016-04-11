@@ -1,0 +1,4 @@
+# automatically add key frames if turned on
+uint8 addKeyFrames
+---
+

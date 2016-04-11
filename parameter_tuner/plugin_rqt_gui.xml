@@ -1,0 +1,12 @@
+<library path="lib/libparametertuner">
+	<class name="parametertuner/Parametertuner" type="parametertuner::Parametertuner" base_class_type="rqt_gui_cpp::Plugin">
+		<description>
+			Tool to set parameters
+		</description>
+		<qtgui>
+			<label>Parametertuner</label>
+			<icon type="theme">hwinfo</icon>
+			<statustip>tip</statustip>
+		</qtgui>
+	</class>
+</library>

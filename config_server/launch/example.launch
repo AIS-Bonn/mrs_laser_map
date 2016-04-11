@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<launch>
+
+  <!-- will try to read an initial configuration file form CONFIGPATH/config_ROBOTNAME -->
+  <node name="config_server" pkg="config_server" type="config_server" output="screen" required="true">
+    <param name="config_path" value="CONFIGPATH" />
+    <param name="robot_name" value="ROBOTNAME" />
+    <param name="robot_type" value="ROBOTTYPE" />
+  </node>
+
+</launch>

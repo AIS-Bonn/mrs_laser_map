@@ -1,0 +1,33 @@
+<library path="lib/libscan_assembler_nodelet">
+  <class name="mrs_laser_mapping/scan_assembler_nodelet" type="mrs_laser_mapping::ScanAssemblerNodelet" base_class_type="nodelet::Nodelet">
+  <description>
+  scan assembler nodelet
+  </description>
+  </class>
+</library>
+
+<library path="lib/libmap_nodelet">
+  <class name="mrs_laser_mapping/map_nodelet" type="mrs_laser_mapping::MapNodelet" base_class_type="nodelet::Nodelet">
+  <description>
+  map nodelet
+  </description>
+  </class>
+</library>
+
+<library path="lib/libslam_nodelet">
+  <class name="mrs_laser_mapping/slam_nodelet" type="mrs_laser_mapping::SlamNodelet" base_class_type="nodelet::Nodelet">
+  <description>
+  slam nodelet
+  </description>
+  </class>
+</library>
+
+<library path="lib/libslam_visualizer_nodelet">
+  <class name="mrs_laser_mapping/slam_visualizer_nodelet" type="mrs_laser_mapping::SlamVisualizerNodelet" base_class_type="nodelet::Nodelet">
+  <description>
+  slam visalization nodelet
+  </description>
+  </class>
+</library>
+
+

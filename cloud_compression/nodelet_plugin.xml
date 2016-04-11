@@ -1,0 +1,8 @@
+<library path="lib/libxyz_compression">
+	<class type="cloud_compression::XYZCompression" base_class_type="nodelet::Nodelet">
+	</class>
+</library>
+<library path="lib/libxyz_decompression">
+	<class type="cloud_compression::XYZDecompression" base_class_type="nodelet::Nodelet">
+	</class>
+</library>
