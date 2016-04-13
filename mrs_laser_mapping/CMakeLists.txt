@@ -104,17 +104,11 @@ SET ( SLAM_SRCS
 )         
 
 SET (SLAM_LIBS
-#         libgslcblas.so 
-        libvtkCommon.so 
-        libvtkFiltering.so 
-        libvtkRendering.so 
-        libvtkGraphics.so 
         ${G2O_CORE_LIBRARY} 
         ${G2O_STUFF_LIBRARY} 
         ${G2O_SOLVER_CSPARSE} 
         ${G2O_SOLVER_CSPARSE_EXTENSION} 
         ${G2O_TYPES_SLAM3D} 
-        libcxsparse.so 
 )
  
 add_library(scan_assembler_nodelet src/nodes/scan_assembler_nodelet.cpp)
@@ -130,7 +124,7 @@ add_dependencies(map_nodelet
 )
  
 add_library(slam_nodelet src/nodes/slam_nodelet.cpp ${SLAM_SRCS})
-target_link_libraries(slam_nodelet ${SLAM_LIBS} ${mrs_laser_maps_LIBRARIES} ${TBB_LIBRARIES} ${catkin_LIBRARIES}) 
+target_link_libraries(slam_nodelet ${SLAM_LIBS} ${mrs_laser_maps_LIBRARIES} ${TBB_LIBRARIES}  ${catkin_LIBRARIES} ) 
 add_dependencies(slam_nodelet
 	${PROJECT_NAME}_generate_messages_cpp
 )

@@ -45,16 +45,16 @@ ScanAssemblerNodelet::ScanAssemblerNodelet()
   , wait_duration_(0.1)
   , scan_line_buffer_(40)
  
-	, is_running_(true)
+  , is_running_(true)
   , is_first_scan_line_(true)
   , is_first_scan_(true)
 
-	, cloud_for_assembler_(new pcl::PointCloud<OutputPointType>())
-	
+  , cloud_for_assembler_(new pcl::PointCloud<OutputPointType>())
+  
   , last_laser_yaw_angle_(0.0)
 
-  , half_scan_(false)
-  , use_invalid_points_(false)
+  , half_rotation_(false)
+  , add_invalid_points_(false)
 {
   NODELET_INFO("Initializing scan assembler nodelet.. ");
 }
@@ -68,13 +68,13 @@ ScanAssemblerNodelet::~ScanAssemblerNodelet()
 
 void ScanAssemblerNodelet::onInit()
 {
-  NODELET_DEBUG("onInit nodelet...");
+  NODELET_DEBUG("ScanAssemblerNodelet onInit()");
 
   ros::NodeHandle& ph = getMTPrivateNodeHandle();
 
   ph.getParam("frame_id", frame_id_);
-  ph.getParam("use_invalid_points", use_invalid_points_);
-  ph.getParam("use_half_scans", half_scan_);
+  ph.getParam("add_invalid_points", add_invalid_points_);
+  ph.getParam("half_rotation", half_rotation_);
 
   double transform_wait_duration;
   ph.param<double>("transform_wait_duration", transform_wait_duration, 0.1);
@@ -141,27 +141,28 @@ void ScanAssemblerNodelet::processScans()
     try
     {
       // keep points with max range measurements
-      if (use_invalid_points_)
+      if (add_invalid_points_)
       {
-	for (unsigned int i = 0; i < scan.ranges.size(); i++)
-	{
-	  if (scan.ranges[i] >= scan.range_max)
-	  {
-	    scan.ranges[i] = scan.range_max - 0.1;
-	  }
-	}
-	scan_projector_.transformLaserScanToPointCloud(frame_id_, scan, cloud, tf_listener_, -1.0,
-	    laser_geometry::channel_option::Default);
+        for (unsigned int i = 0; i < scan.ranges.size(); i++)
+        {
+          if (scan.ranges[i] >= scan.range_max)
+          {
+            scan.ranges[i] = scan.range_max - 0.1;
+          }
+        }
+        scan_projector_.transformLaserScanToPointCloud(frame_id_, scan, cloud, tf_listener_, -1.0,
+        laser_geometry::channel_option::Default);
       }
       else
       {
-	scan_projector_.transformLaserScanToPointCloud(frame_id_, scan, cloud, tf_listener_, 35.f,
-	    laser_geometry::channel_option::Default);
+        scan_projector_.transformLaserScanToPointCloud(frame_id_, scan, cloud, tf_listener_, 35.f,
+        laser_geometry::channel_option::Default);
       }
 
-      // fix fields.count member (bug in ros)
+      // fix fields.count member
       for (unsigned int i = 0; i < cloud.fields.size(); i++)
-	cloud.fields[i].count = 1;
+        cloud.fields[i].count = 1;
+      
       pcl::fromROSMsg(cloud, *cloud_transformed);
     }
     catch (tf::TransformException& exc)
@@ -232,11 +233,11 @@ void ScanAssemblerNodelet::processScans()
       // discard first point cloud. it tends to be incomplete
       if (!is_first_scan_)
       {
-	scan_publisher_.publish(output_cloud);
-	NODELET_DEBUG("published cloud");
+        scan_publisher_.publish(output_cloud);
+        NODELET_DEBUG("published cloud");
       }
       else
-	is_first_scan_ = false;
+        is_first_scan_ = false;
 
       scan_line_number = 0;
     }
@@ -260,7 +261,7 @@ bool ScanAssemblerNodelet::isScanComplete(pcl::PointCloud<PointT>::Ptr scan_clou
 
 bool ScanAssemblerNodelet::isScanComplete(float laser_angle)
 {
-  return (last_laser_yaw_angle_ < 0 && laser_angle > 0) || (half_scan_ && (last_laser_yaw_angle_ > 0 && laser_angle < 0));
+  return (last_laser_yaw_angle_ < 0 && laser_angle > 0) || (half_rotation_ && (last_laser_yaw_angle_ > 0 && laser_angle < 0));
 }
 }
 

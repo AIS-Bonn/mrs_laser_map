@@ -315,7 +315,7 @@ void MapPublisher::publishMap(const boost::shared_ptr<mrs_laser_maps::MultiResol
   }
 
   m_mapMsgPublisher.publish(mapMsg);
-  ROS_INFO_STREAM("published map message took: " << timer.getTime() << " ms with " << nrPoints
+  ROS_DEBUG_STREAM_NAMED("map_publisher","published map message took: " << timer.getTime() << " ms with " << nrPoints
                                                  << " points. from timestamp " << mapMsg->header.stamp << " at time "
                                                  << ros::Time::now());
 }

@@ -105,8 +105,8 @@ private:
 
   std::string scan_header_frame_id_;
   
-  bool half_scan_;
-  bool use_invalid_points_;
+  bool half_rotation_;
+  bool add_invalid_points_;
 };
 }
 

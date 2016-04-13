@@ -89,9 +89,11 @@ namespace mrs_laser_mapping
 {
 SlamNodelet::SlamNodelet()
   : m_running(true)
-  , m_tfListener(ros::Duration(20.0))
+  , tf_listener_(ros::Duration(20.0))
+  , transform_wait_duration_(0.2)
   , m_slamMapFrameId("/world_corrected_slam")
   , m_heightImageFrame("/map")
+  , m_odometryFrameId("/odom")
   , m_maxIter(100)
   , m_priorProb(0.25)
   , m_softAssocC1(0.9)
@@ -105,7 +107,7 @@ SlamNodelet::SlamNodelet()
   , m_heightImageResolution()
   , m_addKeyFramesByDistance(true)
   , m_keyFrameCounter(0)
-  , m_mapBuffer(10)
+  , m_mapBuffer(5)
   , m_evaluatePointDrift(false)
 {
 }
@@ -131,8 +133,10 @@ void SlamNodelet::onInit()
   ros::NodeHandle& ph = getMTPrivateNodeHandle();
 
   ph.getParam("slam_frame_id", m_slamMapFrameId);
+  ph.getParam("odom_frame_id", m_odometryFrameId);
 
-  m_mapSubscriber = ph.subscribe("map", 10, &SlamNodelet::receivedMap, this);
+  
+  m_mapSubscriber = ph.subscribe("map", 1, &SlamNodelet::receivedMap, this);
 
   m_poseUpdateSubscriber = ph.subscribe("pose_update", 1, &SlamNodelet::receivedPoseUpdate, this);
 
@@ -156,6 +160,8 @@ void SlamNodelet::onInit()
   m_evaluatePointDriftService =
       ph.advertiseService("evaluate_point_drift", &SlamNodelet::evaluatePointDriftServiceCall, this);
 
+  ph.getParam("transform_wait_duration", transform_wait_duration_);
+      
   // for registration
   ph.getParam("max_iter", m_maxIter);
   ph.getParam("prior_prob", m_priorProb);
@@ -188,8 +194,6 @@ void SlamNodelet::onInit()
       boost::shared_ptr<boost::thread>(new boost::thread(boost::bind(&SlamNodelet::broadcastTf, this)));
   m_processMapThread =
       boost::shared_ptr<boost::thread>(new boost::thread(boost::bind(&SlamNodelet::processMapQueue, this)));
-//   m_evaluatePointDriftThread =
-//       boost::shared_ptr<boost::thread>(new boost::thread(boost::bind(&SlamNodelet::evaluateInterMapPointDrift, this)));
 }
 
 void SlamNodelet::initSLAMGraph()
@@ -221,10 +225,10 @@ void SlamNodelet::broadcastTf()
     {
       boost::unique_lock<boost::mutex> lock(m_correctionTransformMutex);
       // publish current slam pose
-      m_tfBroadcaster.sendTransform(
-          tf::StampedTransform(m_worldCorrectedSlam, ros::Time::now(), "/odom", m_slamMapFrameId));
-      m_tfListener.setTransform(
-          tf::StampedTransform(m_worldCorrectedSlam, ros::Time::now(), "/odom", m_slamMapFrameId));
+      tf_broadcaster_.sendTransform(
+          tf::StampedTransform(m_worldCorrectedSlam, ros::Time::now(), m_odometryFrameId, m_slamMapFrameId));
+      tf_listener_.setTransform(
+          tf::StampedTransform(m_worldCorrectedSlam, ros::Time::now(), m_odometryFrameId, m_slamMapFrameId));
     }
     loopRate.sleep();
   }
@@ -307,7 +311,8 @@ void SlamNodelet::receivedMap(const mrs_laser_mapping::MultiResolutionMapConstPt
 {
   NODELET_DEBUG_STREAM("received map from timestamp " << msg->header.stamp << " at time " << ros::Time::now());
   mrs_laser_mapping::MultiResolutionMapPtr map(new mrs_laser_mapping::MultiResolutionMap(*msg));
-  m_mapBuffer.push_front(map);
+//   m_mapBuffer.push_front(map);
+  update(map);
 }
 
 void SlamNodelet::update(const mrs_laser_mapping::MultiResolutionMapConstPtr& msg)
@@ -342,19 +347,7 @@ void SlamNodelet::update(const mrs_laser_mapping::MultiResolutionMapConstPtr& ms
 
   // get current odometry transform
   tf::StampedTransform odomTransform;
-  bool hasTransform = true;
-  {
-    if (m_tfListener.waitForTransform("/odom", msg->header.frame_id, msg->header.stamp, ros::Duration(0.5f)))
-    {
-      m_tfListener.lookupTransform("/odom", msg->header.frame_id, msg->header.stamp, odomTransform);
-    }
-    else
-    {
-      NODELET_ERROR_STREAM("slam_nodelet: base_link_oriented in in odom: error in getting transform");
-      hasTransform = false;
-    }
-  }
-  if (!hasTransform)
+  if (!getTranform(m_odometryFrameId, msg->header.frame_id, msg->header.stamp, odomTransform ))
     return;
 
   Eigen::Affine3d odomTransformEigen;
@@ -362,19 +355,7 @@ void SlamNodelet::update(const mrs_laser_mapping::MultiResolutionMapConstPtr& ms
 
   // get current base_link_oriented transform from the slam frame at last scans time
   tf::StampedTransform slamFrameBloTransform;
-  hasTransform = true;
-  {
-    if (m_tfListener.waitForTransform(m_slamMapFrameId, msg->header.frame_id, msg->header.stamp, ros::Duration(0.5f)))
-    {
-      m_tfListener.lookupTransform(m_slamMapFrameId, msg->header.frame_id, msg->header.stamp, slamFrameBloTransform);
-    }
-    else
-    {
-      NODELET_ERROR_STREAM("slam_nodelet: slamFrameBloTransform in in odom: error in getting transform ");
-      hasTransform = false;
-    }
-  }
-  if (!hasTransform)
+  if (!getTranform(m_slamMapFrameId, msg->header.frame_id, msg->header.stamp, slamFrameBloTransform ))
     return;
 
   Eigen::Affine3d slamFrameBloEigen;
@@ -382,21 +363,7 @@ void SlamNodelet::update(const mrs_laser_mapping::MultiResolutionMapConstPtr& ms
 
   // use estimated transform from local mapping as initial transform guess
   tf::StampedTransform baseLinkOrientedTransform;
-  hasTransform = true;
-  {
-    if (m_tfListener.waitForTransform("/world_corrected", msg->header.frame_id, msg->header.stamp, ros::Duration(0.3f)))
-    {
-      m_tfListener.lookupTransform("/world_corrected", msg->header.frame_id, msg->header.stamp,
-                                   baseLinkOrientedTransform);
-    }
-    else
-    {
-      NODELET_ERROR_STREAM("slam_nodelet: base_link_oriented in world_corrected: error in getting transform");
-      hasTransform = false;
-    }
-  }
-
-  if (!hasTransform)
+  if (!getTranform("/world_corrected", msg->header.frame_id, msg->header.stamp, baseLinkOrientedTransform))
     return;
 
   Eigen::Affine3d stampedTransformOrientedEigen;
@@ -425,20 +392,9 @@ void SlamNodelet::update(const mrs_laser_mapping::MultiResolutionMapConstPtr& ms
 
     g2o::VertexSE3* vReference = dynamic_cast<g2o::VertexSE3*>(
         m_slam->optimizer_->vertex(m_slam->keyFrames_[m_slam->referenceKeyFrameId_]->nodeId_));
-    Eigen::Matrix4d trackedPose = vReference->estimate().matrix() * m_slam->lastTransform_;
-
-    // publish current map
-    pcl::PointCloud<mrs_laser_maps::MapPointType>::Ptr cellPointsCloud(new pcl::PointCloud<mrs_laser_maps::MapPointType>());
-    // cellPointsCloud->header.stamp = pcl_conversions::toPCL( msg->header.stamp );
-    cellPointsCloud->header.stamp = pcl_conversions::toPCL(m_lastUpdateTime);
-    cellPointsCloud->header.frame_id = m_slamMapFrameId;  // slam->keyFrames_[ 0 ]->map_->getFrameId();
-    map->getCellPointsDownsampled(cellPointsCloud, 100);
-    pcl::transformPointCloud(*cellPointsCloud, *cellPointsCloud, trackedPose.cast<float>());
-    m_localMapPublisher.publish(cellPointsCloud);
 
     // publish the reference keyframe
     pcl::PointCloud<mrs_laser_maps::MapPointType>::Ptr cellPointsCloudReference(new pcl::PointCloud<mrs_laser_maps::MapPointType>());
-    // cellPointsCloud->header.stamp = pcl_conversions::toPCL( msg->header.stamp );
     cellPointsCloudReference->header.stamp = pcl_conversions::toPCL(m_lastUpdateTime);
     cellPointsCloudReference->header.frame_id = m_slamMapFrameId;  // slam->keyFrames_[ 0 ]->map_->getFrameId();
     m_slam->keyFrames_[m_slam->referenceKeyFrameId_]->map_->getCellPointsDownsampled(cellPointsCloudReference, 100);
@@ -457,36 +413,38 @@ void SlamNodelet::update(const mrs_laser_mapping::MultiResolutionMapConstPtr& ms
 
   NODELET_DEBUG_STREAM("received map after update: " << ros::Time::now() - startTime);
 
-  if ((m_mapBuffer.size() < 1))
-    m_slam->refine(3, 20, 100, 100);
-  Eigen::Matrix4d sensorTransformEigen;
-  // if (!m_hasSensorTransform)
-  {
-    try
-    {
-      //
-      Eigen::Affine3d sensorTransformEigenAffine;
-      tf::StampedTransform sensorTransform;
-      if (m_tfListener.waitForTransform("laser_scanner_origin", "/base_link_oriented", ros::Time(0),
-                                        ros::Duration(0.2)))
-      {
-        m_tfListener.lookupTransform("laser_scanner_origin", "/base_link_oriented", ros::Time(0), sensorTransform);
-        tf::transformTFToEigen(sensorTransform, sensorTransformEigenAffine);
-        sensorTransformEigen = sensorTransformEigenAffine.matrix();
-        // 					m_hasSensorTransform = true;
-      }
-      else
-      {
-        NODELET_ERROR("registerScans:: could not wait for sensor transform");
-        return;
-      }
-    }
-    catch (tf::TransformException ex)
-    {
-      NODELET_ERROR("registerScans:: could not lookup sensor transform: %s", ex.what());
-      return;
-    }
-  }
+//   if ((m_mapBuffer.size() < 1))
+//     m_slam->refine(3, 20, 100, 100);
+  
+  
+//   Eigen::Matrix4d sensorTransformEigen;
+//   // if (!m_hasSensorTransform)
+//   {
+//     try
+//     {
+//       //
+//       Eigen::Affine3d sensorTransformEigenAffine;
+//       tf::StampedTransform sensorTransform;
+//       if (m_tfListener.waitForTransform("laser_scanner_origin", "/base_link_oriented", ros::Time(0),
+//                                         ros::Duration(0.2)))
+//       {
+//         m_tfListener.lookupTransform("laser_scanner_origin", "/base_link_oriented", ros::Time(0), sensorTransform);
+//         tf::transformTFToEigen(sensorTransform, sensorTransformEigenAffine);
+//         sensorTransformEigen = sensorTransformEigenAffine.matrix();
+//         // 					m_hasSensorTransform = true;
+//       }
+//       else
+//       {
+//         NODELET_ERROR("registerScans:: could not wait for sensor transform");
+//         return;
+//       }
+//     }
+//     catch (tf::TransformException ex)
+//     {
+//       NODELET_ERROR("registerScans:: could not lookup sensor transform: %s", ex.what());
+//       return;
+//     }
+//   }
 
 
   NODELET_DEBUG_STREAM("publishing slam map from timestamp " << msg->header.stamp << " at time " << ros::Time::now());
@@ -513,9 +471,9 @@ void SlamNodelet::update(const mrs_laser_mapping::MultiResolutionMapConstPtr& ms
   // publish odometry message
   tf::StampedTransform baseLinkInWorldTransform;
   {
-    if (m_tfListener.waitForTransform(m_slamMapFrameId, "/base_link", msg->header.stamp, ros::Duration(0.5f)))
+    if (tf_listener_.waitForTransform(m_slamMapFrameId, "/base_link", msg->header.stamp, ros::Duration(0.5f)))
     {
-      m_tfListener.lookupTransform(m_slamMapFrameId, "/base_link", msg->header.stamp, baseLinkInWorldTransform);
+      tf_listener_.lookupTransform(m_slamMapFrameId, "/base_link", msg->header.stamp, baseLinkInWorldTransform);
     }
     else
     {
@@ -880,8 +838,8 @@ void SlamNodelet::publishGraph()
 
     m_keyFramePublisher.publish(keyFrameMsg);
 
-    // if a new keyframe was added, let the thread calculate the point drift
-    m_evaluatePointDrift = true;
+//     // if a new keyframe was added, let the thread calculate the point drift
+//     m_evaluatePointDrift = true;
   }
 
   /*
@@ -928,6 +886,46 @@ void SlamNodelet::publishGraph()
 
   m_keyFrameTransformsPublisher.publish(transformsMsg);
 }
+
+
+bool SlamNodelet::getTranform(const std::string& target_frame, const std::string& source_frame, ros::Time time, Eigen::Matrix4f& transform)
+{
+  tf::StampedTransform transform_tf;
+  if ( getTranform(target_frame, source_frame, time, transform_tf) )
+  {
+    Eigen::Affine3d transform_eigen;
+    tf::transformTFToEigen(transform_tf, transform_eigen);
+    transform = transform_eigen.matrix().cast<float>();
+    return true;
+  }
+  else
+    return false;
+}
+
+bool SlamNodelet::getTranform(const std::string& target_frame, const std::string& source_frame, ros::Time time, tf::StampedTransform& transform)
+{
+  try
+  {
+    
+    if (tf_listener_.waitForTransform(target_frame, source_frame, time,
+                                      ros::Duration(transform_wait_duration_)))
+    {
+      tf_listener_.lookupTransform(target_frame, source_frame, time, transform);
+    }
+    else
+    {
+      NODELET_ERROR_STREAM("getTranform: could not wait for transform. target_frame: " << target_frame << " source_frame: " << source_frame );
+      return false;
+    }
+  }
+  catch (tf::TransformException ex)
+  {
+    NODELET_ERROR("getTranform: could not lookup transform: %s", ex.what());
+    return false;
+  }
+  return true;
+}
+
 
 }
 PLUGINLIB_EXPORT_CLASS(mrs_laser_mapping::SlamNodelet, nodelet::Nodelet)

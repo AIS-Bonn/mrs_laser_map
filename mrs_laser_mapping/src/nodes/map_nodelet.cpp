@@ -155,7 +155,7 @@ void MapNodelet::onInit()
   surfel_registration_.sigma_size_factor_ = registration_sigma_size_factor_;
 	
   // subscribe laserscanlines
-  sub_cloud_.subscribe(phMT, "input", 5);
+  sub_cloud_.subscribe(phMT, "input", 3);
   cloud_message_filter_.reset(
       new tf::MessageFilter<sensor_msgs::PointCloud2>(sub_cloud_, tf_listener_, scan_assembler_frame_id_, 100, phMT));
   cloud_message_filter_->registerCallback(boost::bind(&MapNodelet::receivedCloud, this, _1));
@@ -291,7 +291,8 @@ void MapNodelet::receivedCloud(const sensor_msgs::PointCloud2ConstPtr& msg)
   {
     pcl::PointCloud<mrs_laser_maps::InputPointType>::Ptr pcl_cloud(new pcl::PointCloud<mrs_laser_maps::InputPointType>); // TODO
     pcl::fromROSMsg<mrs_laser_maps::InputPointType>(*msg, *pcl_cloud);
-    scan_buffer_.push_front(pcl_cloud);
+//     scan_buffer_.push_front(pcl_cloud);
+    registerScan(pcl_cloud);
   }
   catch (pcl::PCLException& ex)
   {
@@ -425,23 +426,9 @@ void MapNodelet::registerScan(pcl::PointCloud<mrs_laser_maps::InputPointType>::P
 		NODELET_DEBUG_STREAM("estimateTransformationLevenbergMarquardt took: " << registration_timer.getTime() << " ms");
 		NODELET_DEBUG_STREAM("transform \n" << transform);
   }
-  
-
  
   pcl::PointCloud<mrs_laser_maps::MapPointType>::Ptr assembledCloudReg(new pcl::PointCloud<mrs_laser_maps::MapPointType>); // TODO
   pcl::transformPointCloud(*assembledCloudRGB, *assembledCloudReg, transform.cast<float>());
-  
-//   assembledCloudRGB->clear();
-//   pcl::copyPointCloud(*assembledCloudReg, *assembledCloudRGB);
-//   double scanNumberNormalized = fmod((static_cast<double>(scan_number_) / 25.0), 1.0);
-//   for (size_t i = 0; i < assembledCloudRGB->size(); ++i)
-//   {
-//     assembledCloudRGB->points[i].r = static_cast<int>(255.f * ColorMapJet::red(scanNumberNormalized));
-//     assembledCloudRGB->points[i].g = static_cast<int>(255.f * ColorMapJet::green(scanNumberNormalized));
-//     assembledCloudRGB->points[i].b = static_cast<int>(255.f * ColorMapJet::blue(scanNumberNormalized));
-//     assembledCloudRGB->points[i].scanNr = scan_number_;
-//   }
-
   
 	if (add_new_points_ && !checkTorsoRotation(scan_stamp))
 	{
@@ -584,13 +571,13 @@ bool MapNodelet::getTranform(const std::string& target_frame, const std::string&
 		}
 		else
 		{
-			NODELET_ERROR_STREAM("getTranform: could not wait for sensor transform. target_frame: " << target_frame << " source_frame: " << source_frame );
+			NODELET_ERROR_STREAM("getTranform: could not wait for transform. target_frame: " << target_frame << " source_frame: " << source_frame );
 			return false;
 		}
 	}
 	catch (tf::TransformException ex)
 	{
-		NODELET_ERROR("getTranform: could not lookup sensor transform: %s", ex.what());
+		NODELET_ERROR("getTranform: could not lookup transform: %s", ex.what());
 		return false;
 	}
 	return true;

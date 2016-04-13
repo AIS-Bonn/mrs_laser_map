@@ -292,7 +292,7 @@ bool SLAM::update(boost::shared_ptr<mrs_laser_maps::MapType> view, pcl::PointClo
       // keyFrame->cloud_ = pcl::PointCloud< pcl::PointXYZ>::ConstPtr(new pcl::PointCloud< pcl::PointXYZ>(cloud) );
       keyFrame->cloud_ = cloud;
 
-      ROS_INFO_STREAM("------------generate keyframe");
+      ROS_DEBUG_STREAM_NAMED("slam", "------------generate keyframe");
 
       // TODO: evaluate pose covariance between keyframes..
       Eigen::Matrix<double, 6, 6> poseCov = Eigen::Matrix<double, 6, 6>::Identity();
@@ -365,7 +365,6 @@ bool SLAM::update(boost::shared_ptr<mrs_laser_maps::MapType> view, pcl::PointClo
 
     Eigen::Matrix4d diffTransform = v_pose.inverse() * tracked_pose;
 
-    //		double angle = Eigen::AngleAxisd( diffTransform.block< 3, 3 >( 0, 0 ) ).angle();
     double dist = diffTransform.block<3, 1>(0, 3).norm();
 
     if (poseIsClose(diffTransform) && dist < bestDist)
@@ -385,8 +384,7 @@ bool SLAM::update(boost::shared_ptr<mrs_laser_maps::MapType> view, pcl::PointClo
   if (switchReferenceID)
   {
     referenceKeyFrameId_ = bestId;
-    // 		std::cout << "\n \n --------------------------------------------- switching reference id
-    // ------------------------------------- \n \n" ;
+    ROS_DEBUG_STREAM_NAMED("slam", "switched reference keyframe");
   }
 
   // set lastTransform_ to pose wrt reference key frame
@@ -394,13 +392,6 @@ bool SLAM::update(boost::shared_ptr<mrs_laser_maps::MapType> view, pcl::PointClo
   Eigen::Matrix4d pose_ref = v_ref->estimate().matrix();
   lastTransform_ = pose_ref.inverse() * tracked_pose;
 
-  // 	for( EdgeSet::iterator it = optimizer_->edges().begin(); it != optimizer_->edges().end(); ++it ) {
-  // 		g2o::EdgeSE3* edge = dynamic_cast< g2o::EdgeSE3* >( *it );
-  //
-  // 		ROS_ERROR_STREAM("test: " << edge->chi2() );
-  //
-  // 	}
-  //
   return true;
 }
 

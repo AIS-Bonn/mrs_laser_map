@@ -82,34 +82,34 @@ private:
 namespace mrs_laser_mapping
 {
 SlamVisualizerNodelet::SlamVisualizerNodelet()
-  : m_running(true)
-  , m_slamMapFrameId("/world_corrected_slam")
-  , m_runID(0)
-  , m_keyFrameCounter(0)
-  , m_filterLimitMinX(-8.f)
-  , m_filterLimitMaxX(8.f)
-  , m_filterLimitMinY(-8.f)
-  , m_filterLimitMaxY(8.f)
-  , m_filterLimitMinZ(-8.f)
-  , m_filterLimitMaxZ(8.f)
-	, m_minZ(std::numeric_limits<float>::max())
-  , m_maxZ(std::numeric_limits<float>::min())
-	, m_keyframeBuffer(10)
-  , m_keyframeTransformBuffer(10)
+  : is_running_(true)
+  , slam_map_frame_id_("/world_corrected_slam")
+  , filter_limit_min_x_(-8.f)
+  , filter_limit_max_x_(8.f)
+  , filter_limit_min_y_(-8.f)
+  , filter_limit_max_y_(8.f)
+  , filter_limit_min_z_(-8.f)
+  , filter_limit_max_z_(8.f)
+	, run_id_(0)
+  , key_frame_counter_(0)
+	, min_z_(std::numeric_limits<float>::max())
+  , max_z_(std::numeric_limits<float>::min())
+	, keyframe_buffer_(10)
+  , keyframe_transform_buffer_(1)
 {
   NODELET_INFO("Initializing nodelet.. ");
 
-  m_compression.reset(new Compression(pcl::io::HIGH_RES_ONLINE_COMPRESSION_WITHOUT_COLOR));
+  compression_.reset(new Compression(pcl::io::HIGH_RES_ONLINE_COMPRESSION_WITHOUT_COLOR));
 }
 
 SlamVisualizerNodelet::~SlamVisualizerNodelet()
 {
-  if (m_running)
+  if (is_running_)
   {
     printf("stopping threads\n");
     fflush(stdout);
 
-    m_running = false;
+    is_running_ = false;
   }
 
   printf("exiting\n");
@@ -122,29 +122,29 @@ void SlamVisualizerNodelet::onInit()
 
   ros::NodeHandle& ph = getMTPrivateNodeHandle();
 
-  ph.getParam("slam_frame_id", m_slamMapFrameId);
+  ph.getParam("slam_frame_id", slam_map_frame_id_);
 
-  m_keyFrameSubscriber = ph.subscribe("keyframes", 1, &SlamVisualizerNodelet::receivedKeyFrame, this);
-  m_keyFrameTransformsSubscriber =
+  key_frame_subscriber_ = ph.subscribe("keyframes", 1, &SlamVisualizerNodelet::receivedKeyFrame, this);
+  key_frame_transforms_subscriber_ =
       ph.subscribe("keyframe_transforms", 1, &SlamVisualizerNodelet::receivedKeyFrameTransforms, this);
 
-  m_slamGraphMarkerPublisher = ph.advertise<visualization_msgs::Marker>("slam_graph_marker", 10);
-  m_mapPublisher = ph.advertise<sensor_msgs::PointCloud2>("slam_map", 10);
-  m_mapDownsampledPublisher = ph.advertise<sensor_msgs::PointCloud2>("slam_map_downsampled", 10);
-  m_mapColorShadingPublisher = ph.advertise<sensor_msgs::PointCloud2>("slam_map_color_shading", 10);
+  slam_graph_marker_publisher_ = ph.advertise<visualization_msgs::Marker>("slam_graph_marker", 10);
+  map_publisher_ = ph.advertise<sensor_msgs::PointCloud2>("slam_map", 10);
+  map_downsampled_publisher_ = ph.advertise<sensor_msgs::PointCloud2>("slam_map_downsampled", 10);
+  map_color_shading_publisher_ = ph.advertise<sensor_msgs::PointCloud2>("slam_map_color_shading", 10);
 
-  ph.param("voxel_leaf_size", m_voxelLeafSize, 0.1);
+  ph.param("voxel_leaf_size", voxel_leaf_size_, 0.1);
 
-  ph.param("filter_limit_min_x", m_filterLimitMinX, -8.f);
-  ph.param("filter_limit_max_x", m_filterLimitMaxX, 8.f);
-  ph.param("filter_limit_min_y", m_filterLimitMinY, -8.f);
-  ph.param("filter_limit_max_y", m_filterLimitMaxY, 8.f);
-  ph.param("filter_limit_min_z", m_filterLimitMinZ, -8.f);
-  ph.param("filter_limit_max_z", m_filterLimitMaxZ, 8.f);
+  ph.param("filter_limit_min_x", filter_limit_min_x_, -8.f);
+  ph.param("filter_limit_max_x", filter_limit_max_x_, 8.f);
+  ph.param("filter_limit_min_y", filter_limit_min_y_, -8.f);
+  ph.param("filter_limit_max_y", filter_limit_max_y_, 8.f);
+  ph.param("filter_limit_min_z", filter_limit_min_z_, -8.f);
+  ph.param("filter_limit_max_z", filter_limit_max_z_, 8.f);
 
-  m_processKeyframeThread = boost::shared_ptr<boost::thread>(
+  process_keyframe_thread_ = boost::shared_ptr<boost::thread>(
       new boost::thread(boost::bind(&SlamVisualizerNodelet::processKeyframeQueue, this)));
-  m_processKeyframeTransformThread = boost::shared_ptr<boost::thread>(
+  process_keyframe_transform_thread_ = boost::shared_ptr<boost::thread>(
       new boost::thread(boost::bind(&SlamVisualizerNodelet::processKeyframeTransformQueue, this)));
 }
 
@@ -152,274 +152,279 @@ void SlamVisualizerNodelet::receivedKeyFrame(const mrs_laser_mapping::KeyFrameCo
 {
   NODELET_DEBUG_STREAM("received keyframe from timestamp " << msg->header.stamp << " at time " << ros::Time::now());
   mrs_laser_mapping::KeyFramePtr keyframe(new mrs_laser_mapping::KeyFrame(*msg));
-  m_keyframeBuffer.push_front(keyframe);
+  keyframe_buffer_.push_front(keyframe);
 }
 
 void SlamVisualizerNodelet::receivedKeyFrameTransforms(const mrs_laser_mapping::KeyFrameTransformsConstPtr& msg)
 {
   NODELET_DEBUG_STREAM("received map from timestamp " << msg->header.stamp << " at time " << ros::Time::now());
   mrs_laser_mapping::KeyFrameTransformsPtr keyframeTransform(new mrs_laser_mapping::KeyFrameTransforms(*msg));
-  m_keyframeTransformBuffer.push_front(keyframeTransform);
+  keyframe_transform_buffer_.push_front(keyframeTransform);
 }
 
 void SlamVisualizerNodelet::processKeyframeQueue()
 {
-  while (m_running)
+  while (is_running_)
   {
-    if (m_keyframeBuffer.size() > 3)
+    if (keyframe_buffer_.size() > 3)
     {
-      NODELET_WARN_STREAM("elements in buffer: " << m_keyframeBuffer.size());
+      NODELET_WARN_STREAM("elements in buffer: " << keyframe_buffer_.size());
     }
 
     mrs_laser_mapping::KeyFramePtr keyframe;
-    m_keyframeBuffer.pop_back(&keyframe);
+    keyframe_buffer_.pop_back(&keyframe);
     processKeyFrame(keyframe);
   }
 }
 
 void SlamVisualizerNodelet::processKeyframeTransformQueue()
 {
-  while (m_running)
+  while (is_running_)
   {
-    if (m_keyframeTransformBuffer.size() > 3)
+    if (keyframe_transform_buffer_.size() > 3)
     {
-      NODELET_WARN_STREAM("elements in buffer: " << m_keyframeTransformBuffer.size());
+      NODELET_WARN_STREAM("elements in buffer: " << keyframe_transform_buffer_.size());
     }
 
     mrs_laser_mapping::KeyFrameTransformsPtr keyframeTransform;
-    m_keyframeTransformBuffer.pop_back(&keyframeTransform);
+    keyframe_transform_buffer_.pop_back(&keyframeTransform);
     processKeyFrameTransforms(keyframeTransform);
   }
 }
 
 void SlamVisualizerNodelet::processKeyFrame(const mrs_laser_mapping::KeyFrameConstPtr& msg)
 {
-  if (msg->runID != m_runID)
+  if (msg->runID != run_id_)
   {
     NODELET_INFO("SlamVisualizerNodelet: Clearing keyframes");
-    m_keyFrameClouds.clear();
-    m_keyFrameCloudsDownsampled.clear();
-    m_keyFrameCounter = 0;
-    m_runID = msg->runID;
+    key_frame_clouds_.clear();
+    key_frame_clouds_downsampled_.clear();
+    key_frame_counter_ = 0;
+    run_id_ = msg->runID;
   }
 
-  PointCloud::Ptr keyFrameCloud(new PointCloud);
+  PointCloud::Ptr key_frame_cloud(new PointCloud);
   VectorStream stream(&msg->compressedCloud);
-  m_compression->decodePointCloud(stream, keyFrameCloud);
+  compression_->decodePointCloud(stream, key_frame_cloud);
 
-  PointCloud::Ptr keyFrameCloudDownsampled(new PointCloud);
+  PointCloud::Ptr key_frame_cloud_downsampled(new PointCloud);
 
-  pcl::VoxelGrid<PointType> voxelGridFilter;
-  voxelGridFilter.setInputCloud(keyFrameCloud);
-  voxelGridFilter.setLeafSize(m_voxelLeafSize, m_voxelLeafSize, m_voxelLeafSize);
-  voxelGridFilter.filter(*keyFrameCloudDownsampled);
+  pcl::VoxelGrid<PointType> voxel_grid_filter;
+  voxel_grid_filter.setInputCloud(key_frame_cloud);
+  voxel_grid_filter.setLeafSize(voxel_leaf_size_, voxel_leaf_size_, voxel_leaf_size_);
+  voxel_grid_filter.filter(*key_frame_cloud_downsampled);
 
   pcl::PassThrough<PointType> pass;
-  pass.setInputCloud(keyFrameCloudDownsampled);
+  pass.setInputCloud(key_frame_cloud_downsampled);
   pass.setFilterFieldName("x");
-  pass.setFilterLimits(m_filterLimitMinX, m_filterLimitMaxX);
+  pass.setFilterLimits(filter_limit_min_x_, filter_limit_max_x_);
   // pass.setFilterLimitsNegative (true);
-  pass.filter(*keyFrameCloudDownsampled);
+  pass.filter(*key_frame_cloud_downsampled);
 
-  pass.setInputCloud(keyFrameCloudDownsampled);
+  pass.setInputCloud(key_frame_cloud_downsampled);
   pass.setFilterFieldName("y");
-  pass.setFilterLimits(m_filterLimitMinY, m_filterLimitMaxY);
+  pass.setFilterLimits(filter_limit_min_y_, filter_limit_max_y_);
   // pass.setFilterLimitsNegative (true);
-  pass.filter(*keyFrameCloudDownsampled);
+  pass.filter(*key_frame_cloud_downsampled);
 
-  pass.setInputCloud(keyFrameCloudDownsampled);
+  pass.setInputCloud(key_frame_cloud_downsampled);
   pass.setFilterFieldName("z");
-  pass.setFilterLimits(m_filterLimitMinZ, m_filterLimitMaxZ);
+  pass.setFilterLimits(filter_limit_min_z_, filter_limit_max_z_);
   // pass.setFilterLimitsNegative (true);
-  pass.filter(*keyFrameCloudDownsampled);
+  pass.filter(*key_frame_cloud_downsampled);
 
   pcl::StatisticalOutlierRemoval<PointType> sor;
-  sor.setInputCloud(keyFrameCloudDownsampled);
+  sor.setInputCloud(key_frame_cloud_downsampled);
   sor.setMeanK(50);
   sor.setStddevMulThresh(1.0);
-  sor.filter(*keyFrameCloudDownsampled);
+  sor.filter(*key_frame_cloud_downsampled);
 
-  pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr keyFrameCloudDownsampledNormals(
+  pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr key_frame_cloud_downsampled_normals(
       new pcl::PointCloud<pcl::PointXYZRGBNormal>);
-  pcl::copyPointCloud(*keyFrameCloudDownsampled, *keyFrameCloudDownsampledNormals);
+  pcl::copyPointCloud(*key_frame_cloud_downsampled, *key_frame_cloud_downsampled_normals);
 
   pcl::NormalEstimation<PointType, pcl::PointXYZRGBNormal> ne;
-  ne.setInputCloud(keyFrameCloudDownsampled);
+  ne.setInputCloud(key_frame_cloud_downsampled);
   ne.setRadiusSearch(0.25);
-  ne.compute(*keyFrameCloudDownsampledNormals);
+  ne.compute(*key_frame_cloud_downsampled_normals);
 
   // update members here to keep lock short
   {
-    boost::unique_lock<boost::mutex> lock(m_keyframeMutex);
-    if (msg->keyframeID < m_keyFrameClouds.size())
+    boost::unique_lock<boost::mutex> lock(keyframe_mutex_);
+    if (msg->keyframeID < key_frame_clouds_.size())
     {
-      *m_keyFrameClouds[msg->keyframeID] = *keyFrameCloud;
-      *m_keyFrameCloudsDownsampled[msg->keyframeID] = *keyFrameCloudDownsampled;
-      *m_keyFrameCloudsDownsampledNormals[msg->keyframeID] = *keyFrameCloudDownsampledNormals;
+      *key_frame_clouds_[msg->keyframeID] = *key_frame_cloud;
+      *key_frame_clouds_downsampled_[msg->keyframeID] = *key_frame_cloud_downsampled;
+      *key_frame_clouds_downsampled_normals_[msg->keyframeID] = *key_frame_cloud_downsampled_normals;
       ROS_INFO("updated keyframe cloud");
     }
     else
     {
-      m_keyFrameClouds.push_back(keyFrameCloud);
-      m_keyFrameCloudsDownsampled.push_back(keyFrameCloudDownsampled);
-      m_keyFrameCloudsDownsampledNormals.push_back(keyFrameCloudDownsampledNormals);
-      m_keyFrameCounter++;
+      key_frame_clouds_.push_back(key_frame_cloud);
+      key_frame_clouds_downsampled_.push_back(key_frame_cloud_downsampled);
+      key_frame_clouds_downsampled_normals_.push_back(key_frame_cloud_downsampled_normals);
+      key_frame_counter_++;
     }
   }
 
-  for (size_t i = 0; i < keyFrameCloudDownsampled->size(); ++i)
+  for (size_t i = 0; i < key_frame_cloud_downsampled->size(); ++i)
   {
-    m_minZ = std::min(keyFrameCloudDownsampled->points[i].z, m_minZ);
-    m_maxZ = std::max(keyFrameCloudDownsampled->points[i].z, m_maxZ);
+    min_z_ = std::min(key_frame_cloud_downsampled->points[i].z, min_z_);
+    max_z_ = std::max(key_frame_cloud_downsampled->points[i].z, max_z_);
   }
 }
 
 void SlamVisualizerNodelet::processKeyFrameTransforms(const mrs_laser_mapping::KeyFrameTransformsConstPtr& msg)
 {
-  m_keyFrameTransforms.clear();
+  keyframe_transforms_.clear();
   for (size_t i = 0; i < msg->transforms.size(); i++)
   {
-    Eigen::Affine3d nodeTransformEigen;
-    tf::transformMsgToEigen(msg->transforms[i], nodeTransformEigen);
-    m_keyFrameTransforms.push_back(nodeTransformEigen.matrix());
+    Eigen::Affine3d node_transform_eigen;
+    tf::transformMsgToEigen(msg->transforms[i], node_transform_eigen);
+    keyframe_transforms_.push_back(node_transform_eigen.matrix());
   }
 
-  ros::Rate loopRate(50);
-  while (m_keyFrameTransforms.size() > m_keyFrameCounter)
+  // if we received the new edges before the new vertex we wait till for the new vertex 
+  ros::Rate rate(50);
+  while (keyframe_transforms_.size() > key_frame_counter_)
   {
     NODELET_DEBUG("m_keyFrameTransforms.size() > m_keyFrameClouds.size()");
-    loopRate.sleep();
+    rate.sleep();
   }
 
   /*
    * keyframe point clouds
    */
-  PointCloudPtr fullGraphCloud(new PointCloud());
-  PointCloudPtr downSampledGraphCloud(new PointCloud());
-  pcl::PointCloud<pcl::PointXYZRGB>::Ptr downSampledColorShadedGraphCloud(new pcl::PointCloud<pcl::PointXYZRGB>());
-  boost::unique_lock<boost::mutex> lock(m_keyframeMutex);
+  PointCloudPtr graph_cloud(new PointCloud());
+  PointCloudPtr downsampled_graph_cloud(new PointCloud());
+  pcl::PointCloud<pcl::PointXYZRGB>::Ptr downsampled_color_cloud(new pcl::PointCloud<pcl::PointXYZRGB>());
+  
+  keyframe_mutex_.lock();
 
-  for (size_t i = 0; i < m_keyFrameCounter; i++)
+  for (size_t i = 0; i < key_frame_counter_; i++)
   {
-    PointCloudPtr transformedCloud = PointCloudPtr(new PointCloud());
-    pcl::transformPointCloud(*m_keyFrameClouds[i], *transformedCloud, m_keyFrameTransforms[i].cast<float>());
+    PointCloudPtr transformed_cloud = PointCloudPtr(new PointCloud());
+    pcl::transformPointCloud(*key_frame_clouds_[i], *transformed_cloud, keyframe_transforms_[i].cast<float>());
 
-    PointCloudPtr transformedCloudDownsampled = PointCloudPtr(new PointCloud());
-    pcl::transformPointCloud(*m_keyFrameCloudsDownsampled[i], *transformedCloudDownsampled,
-                             m_keyFrameTransforms[i].cast<float>());
+    PointCloudPtr transformed_cloud_downsampled = PointCloudPtr(new PointCloud());
+    pcl::transformPointCloud(*key_frame_clouds_downsampled_[i], *transformed_cloud_downsampled,
+                             keyframe_transforms_[i].cast<float>());
 
-    pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr transformedCloudDownsampledNormals =
-        pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr(new pcl::PointCloud<pcl::PointXYZRGBNormal>());
-    pcl::transformPointCloud(*m_keyFrameCloudsDownsampledNormals[i], *transformedCloudDownsampledNormals,
-                             m_keyFrameTransforms[i].cast<float>());
+//     pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr transformedCloudDownsampledNormals =
+//         pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr(new pcl::PointCloud<pcl::PointXYZRGBNormal>());
+//     pcl::transformPointCloud(*key_frame_clouds_downsampled_normals_[i], *transformedCloudDownsampledNormals,
+//                              keyframe_transforms_[i].cast<float>());
+// 
+//     pcl::PointCloud<pcl::PointXYZRGB>::Ptr transformedCloudDownsampledRGB =
+//         pcl::PointCloud<pcl::PointXYZRGB>::Ptr(new pcl::PointCloud<pcl::PointXYZRGB>());
+// 
+//     transformedCloudDownsampledRGB->points.resize(transformedCloudDownsampled->points.size());
+// 
+//     float light_x = 1;
+//     float light_y = 0;
+//     float light_z = 0;
+// 
+//     std::vector<float> direction_of_light;
+//     direction_of_light.push_back(light_x);
+//     direction_of_light.push_back(light_y);
+//     direction_of_light.push_back(light_z);
+// 
+//     float min_v = 0.3f;
+// 
+//     for (size_t i = 0; i < transformedCloudDownsampled->points.size(); i++)
+//     {
+//       transformedCloudDownsampledRGB->points[i].x = transformedCloudDownsampled->points[i].x;
+//       transformedCloudDownsampledRGB->points[i].y = transformedCloudDownsampled->points[i].y;
+//       transformedCloudDownsampledRGB->points[i].z = transformedCloudDownsampled->points[i].z;
+// 
+//       float value_range_min = 0.0f;
+//       float value_range_max = 45.f;  // 360.0f;
+// 
+//       float h = value_range_min +
+//                 ((transformedCloudDownsampledRGB->points[i].z - min_z_) / (max_z_ - min_z_)) *
+//                     (value_range_max - value_range_min);
+//       h = std::min(360.0f, std::max(0.0f, h));
+// 
+//       // s = 1.f for color 0.f for grayscale?
+//       float s = 0.5f;
+// 
+//       // normalen zum viewpoint flippen
+//       flipNormalTowardsViewpoint(transformedCloudDownsampledNormals->points[i], direction_of_light[0],
+//                                  direction_of_light[1], direction_of_light[2],
+//                                  transformedCloudDownsampledNormals->points[i].normal_x,
+//                                  transformedCloudDownsampledNormals->points[i].normal_y,
+//                                  transformedCloudDownsampledNormals->points[i].normal_z);
+//       // winkel zwischen normalen und lichtvektor
+//       float product_of_vektors = direction_of_light[0] * transformedCloudDownsampledNormals->points[i].normal_x +
+//                                  direction_of_light[1] * transformedCloudDownsampledNormals->points[i].normal_y +
+//                                  direction_of_light[2] * transformedCloudDownsampledNormals->points[i].normal_z;
+//       float lenght_normal = sqrt(transformedCloudDownsampledNormals->points[i].normal_x *
+//                                      transformedCloudDownsampledNormals->points[i].normal_x +
+//                                  transformedCloudDownsampledNormals->points[i].normal_y *
+//                                      transformedCloudDownsampledNormals->points[i].normal_y +
+//                                  transformedCloudDownsampledNormals->points[i].normal_z *
+//                                      transformedCloudDownsampledNormals->points[i].normal_z);
+//       float lenght_light =
+//           sqrt(direction_of_light[0] * direction_of_light[0] + direction_of_light[1] * direction_of_light[1] +
+//                direction_of_light[2] * direction_of_light[2]);
+//       float angle = static_cast<float>(acos(product_of_vektors / (lenght_normal * lenght_light)));
+// 
+//       angle = fabs(angle);
+// 
+//       if (angle >= 1.570797)
+//       {
+//         float diff = angle - 1.570797;
+//         angle = angle - (diff * 2.0);
+//       }
+// 
+//       float v = ((1.0 - (angle / 1.6)) * (1.0 - min_v)) + min_v;
+// 
+//       if (std::isnan(v))
+//         v = 1.0f;
+// 
+//       // berechnete Werte n rgb umwandeln ...
+//       float r, g, b;
+//       HSVtoRGB(h, s, v, &r, &g, &b);
+//       r *= 255.0f;
+//       r = std::max(0.0f, std::min(255.0f, r));
+//       g *= 255.0f;
+//       g = std::max(0.0f, std::min(255.0f, g));
+//       b *= 255.0f;
+//       b = std::max(0.0f, std::min(255.0f, b));
+//       if ((r > 250.0f) && (g > 250.0f) && (b > 250.0f) && (i > 0))
+//       {
+//         PCL_INFO("color error: %d, %0.2f, %0.2f, %0.2f ... %0.2f %0.2f %0.2f\n", i,
+//                  transformedCloudDownsampledRGB->points[i].x, transformedCloudDownsampledRGB->points[i].y,
+//                  transformedCloudDownsampledRGB->points[i].z, h, s, v);
+//         r = transformedCloudDownsampledRGB->points[i - 1].r;
+//         g = transformedCloudDownsampledRGB->points[i - 1].g;
+//         b = transformedCloudDownsampledRGB->points[i - 1].b;
+//       }
+// 
+//       transformedCloudDownsampledRGB->points[i].r = static_cast<unsigned char>(r);
+//       transformedCloudDownsampledRGB->points[i].g = static_cast<unsigned char>(g);
+//       transformedCloudDownsampledRGB->points[i].b = static_cast<unsigned char>(b);
+//     }
 
-    pcl::PointCloud<pcl::PointXYZRGB>::Ptr transformedCloudDownsampledRGB =
-        pcl::PointCloud<pcl::PointXYZRGB>::Ptr(new pcl::PointCloud<pcl::PointXYZRGB>());
-
-    transformedCloudDownsampledRGB->points.resize(transformedCloudDownsampled->points.size());
-
-    float light_x = 1;
-    float light_y = 0;
-    float light_z = 0;
-
-    std::vector<float> direction_of_light;
-    direction_of_light.push_back(light_x);
-    direction_of_light.push_back(light_y);
-    direction_of_light.push_back(light_z);
-
-    float min_v = 0.3f;
-
-    for (size_t i = 0; i < transformedCloudDownsampled->points.size(); i++)
-    {
-      transformedCloudDownsampledRGB->points[i].x = transformedCloudDownsampled->points[i].x;
-      transformedCloudDownsampledRGB->points[i].y = transformedCloudDownsampled->points[i].y;
-      transformedCloudDownsampledRGB->points[i].z = transformedCloudDownsampled->points[i].z;
-
-      float value_range_min = 0.0f;
-      float value_range_max = 45.f;  // 360.0f;
-
-      float h = value_range_min +
-                ((transformedCloudDownsampledRGB->points[i].z - m_minZ) / (m_maxZ - m_minZ)) *
-                    (value_range_max - value_range_min);
-      h = std::min(360.0f, std::max(0.0f, h));
-
-      // s = 1.f for color 0.f for grayscale?
-      float s = 0.5f;
-
-      // normalen zum viewpoint flippen
-      flipNormalTowardsViewpoint(transformedCloudDownsampledNormals->points[i], direction_of_light[0],
-                                 direction_of_light[1], direction_of_light[2],
-                                 transformedCloudDownsampledNormals->points[i].normal_x,
-                                 transformedCloudDownsampledNormals->points[i].normal_y,
-                                 transformedCloudDownsampledNormals->points[i].normal_z);
-      // winkel zwischen normalen und lichtvektor
-      float product_of_vektors = direction_of_light[0] * transformedCloudDownsampledNormals->points[i].normal_x +
-                                 direction_of_light[1] * transformedCloudDownsampledNormals->points[i].normal_y +
-                                 direction_of_light[2] * transformedCloudDownsampledNormals->points[i].normal_z;
-      float lenght_normal = sqrt(transformedCloudDownsampledNormals->points[i].normal_x *
-                                     transformedCloudDownsampledNormals->points[i].normal_x +
-                                 transformedCloudDownsampledNormals->points[i].normal_y *
-                                     transformedCloudDownsampledNormals->points[i].normal_y +
-                                 transformedCloudDownsampledNormals->points[i].normal_z *
-                                     transformedCloudDownsampledNormals->points[i].normal_z);
-      float lenght_light =
-          sqrt(direction_of_light[0] * direction_of_light[0] + direction_of_light[1] * direction_of_light[1] +
-               direction_of_light[2] * direction_of_light[2]);
-      float angle = static_cast<float>(acos(product_of_vektors / (lenght_normal * lenght_light)));
-
-      angle = fabs(angle);
-
-      if (angle >= 1.570797)
-      {
-        float diff = angle - 1.570797;
-        angle = angle - (diff * 2.0);
-      }
-
-      float v = ((1.0 - (angle / 1.6)) * (1.0 - min_v)) + min_v;
-
-      if (std::isnan(v))
-        v = 1.0f;
-
-      // berechnete Werte n rgb umwandeln ...
-      float r, g, b;
-      HSVtoRGB(h, s, v, &r, &g, &b);
-      r *= 255.0f;
-      r = std::max(0.0f, std::min(255.0f, r));
-      g *= 255.0f;
-      g = std::max(0.0f, std::min(255.0f, g));
-      b *= 255.0f;
-      b = std::max(0.0f, std::min(255.0f, b));
-      if ((r > 250.0f) && (g > 250.0f) && (b > 250.0f) && (i > 0))
-      {
-        PCL_INFO("color error: %d, %0.2f, %0.2f, %0.2f ... %0.2f %0.2f %0.2f\n", i,
-                 transformedCloudDownsampledRGB->points[i].x, transformedCloudDownsampledRGB->points[i].y,
-                 transformedCloudDownsampledRGB->points[i].z, h, s, v);
-        r = transformedCloudDownsampledRGB->points[i - 1].r;
-        g = transformedCloudDownsampledRGB->points[i - 1].g;
-        b = transformedCloudDownsampledRGB->points[i - 1].b;
-      }
-
-      transformedCloudDownsampledRGB->points[i].r = static_cast<unsigned char>(r);
-      transformedCloudDownsampledRGB->points[i].g = static_cast<unsigned char>(g);
-      transformedCloudDownsampledRGB->points[i].b = static_cast<unsigned char>(b);
-    }
-
-    *fullGraphCloud += *transformedCloud;
-    *downSampledGraphCloud += *transformedCloudDownsampled;
-    *downSampledColorShadedGraphCloud += *transformedCloudDownsampledRGB;
+    *graph_cloud += *transformed_cloud;
+    *downsampled_graph_cloud += *transformed_cloud_downsampled;
+//     *downSampledColorShadedGraphCloud += *transformedCloudDownsampledRGB;
   }
+  
+  keyframe_mutex_.unlock();
 
-  fullGraphCloud->header.stamp = pcl_conversions::toPCL(msg->header.stamp);
-  fullGraphCloud->header.frame_id = msg->header.frame_id;
-  m_mapPublisher.publish(fullGraphCloud);
+  
+  graph_cloud->header.stamp = pcl_conversions::toPCL(msg->header.stamp);
+  graph_cloud->header.frame_id = msg->header.frame_id;
+  map_publisher_.publish(graph_cloud);
 
-  downSampledGraphCloud->header.stamp = pcl_conversions::toPCL(msg->header.stamp);
-  downSampledGraphCloud->header.frame_id = msg->header.frame_id;
-  m_mapDownsampledPublisher.publish(downSampledGraphCloud);
+  downsampled_graph_cloud->header.stamp = pcl_conversions::toPCL(msg->header.stamp);
+  downsampled_graph_cloud->header.frame_id = msg->header.frame_id;
+  map_downsampled_publisher_.publish(downsampled_graph_cloud);
 
-  downSampledColorShadedGraphCloud->header.stamp = pcl_conversions::toPCL(msg->header.stamp);
-  downSampledColorShadedGraphCloud->header.frame_id = msg->header.frame_id;
-  m_mapColorShadingPublisher.publish(downSampledColorShadedGraphCloud);
+  downsampled_color_cloud->header.stamp = pcl_conversions::toPCL(msg->header.stamp);
+  downsampled_color_cloud->header.frame_id = msg->header.frame_id;
+  map_color_shading_publisher_.publish(downsampled_color_cloud);
 
   /*
    * edge marker
@@ -461,18 +466,18 @@ void SlamVisualizerNodelet::processKeyFrameTransforms(const mrs_laser_mapping::K
     line_list.points.push_back(msg->edgeEndPoints[i]);
   }
 
-  for (size_t i = 0; i < m_keyFrameTransforms.size(); i++)
+  for (size_t i = 0; i < keyframe_transforms_.size(); i++)
   {
     geometry_msgs::Point p;
-    p.x = m_keyFrameTransforms[i](0, 3);
-    p.y = m_keyFrameTransforms[i](1, 3);
-    p.z = m_keyFrameTransforms[i](2, 3);
+    p.x = keyframe_transforms_[i](0, 3);
+    p.y = keyframe_transforms_[i](1, 3);
+    p.z = keyframe_transforms_[i](2, 3);
 
     points.points.push_back(p);
   }
 
-  m_slamGraphMarkerPublisher.publish(points);
-  m_slamGraphMarkerPublisher.publish(line_list);
+  slam_graph_marker_publisher_.publish(points);
+  slam_graph_marker_publisher_.publish(line_list);
 }
 }
 PLUGINLIB_EXPORT_CLASS(mrs_laser_mapping::SlamVisualizerNodelet, nodelet::Nodelet)

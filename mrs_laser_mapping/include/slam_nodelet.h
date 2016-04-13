@@ -110,6 +110,9 @@ public:
 
   void broadcastTf();
 
+  bool getTranform(const std::string& target_frame, const std::string& source_frame, ros::Time time, Eigen::Matrix4f& transform);
+  bool getTranform(const std::string& target_frame, const std::string& source_frame, ros::Time time, tf::StampedTransform& transform);
+  
 //   void evaluateInterMapPointDrift();
 
 protected:
@@ -170,14 +173,17 @@ private:
   ros::ServiceServer m_resendKeyframesService;
   ros::ServiceServer m_evaluatePointDriftService;
 
-  tf::TransformListener m_tfListener;
-  tf::TransformBroadcaster m_tfBroadcaster;
+  tf::TransformListener tf_listener_;
+  tf::TransformBroadcaster tf_broadcaster_;
 
+  double transform_wait_duration_;
+  
   tf::StampedTransform m_lastBaseLinkOrientedTransform;
   tf::StampedTransform m_worldCorrectedSlam;
 
   std::string m_slamMapFrameId;
   std::string m_heightImageFrame;
+  std::string m_odometryFrameId;
 
   boost::shared_ptr<mrsmap::SLAM> m_slam;
 
@@ -215,7 +221,6 @@ private:
   boost::mutex m_mapBufferMutex;
   boost::shared_ptr<boost::thread> m_processMapThread;
 
-  boost::shared_ptr<boost::thread> m_evaluatePointDriftThread;
   bool m_evaluatePointDrift;
 };
 }

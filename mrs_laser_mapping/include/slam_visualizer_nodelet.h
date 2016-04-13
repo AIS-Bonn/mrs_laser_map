@@ -53,9 +53,6 @@
 #include <tf/message_filter.h>
 #include <tf_conversions/tf_eigen.h>
 
-#include <tf/transform_broadcaster.h>
-#include <tf/transform_listener.h>
-
 #include <sensor_msgs/PointCloud.h>
 
 #include <visualization_msgs/Marker.h>
@@ -144,52 +141,50 @@ private:
   typedef pcl::PointCloud<PointType> PointCloud;
   typedef PointCloud::Ptr PointCloudPtr;
 
-  volatile bool m_running;
+  volatile bool is_running_;
 
-  ros::Subscriber m_keyFrameSubscriber;
-  ros::Subscriber m_keyFrameTransformsSubscriber;
+  ros::Subscriber key_frame_subscriber_;
+  ros::Subscriber key_frame_transforms_subscriber_;
 
-  ros::Publisher m_slamGraphMarkerPublisher;
-  ros::Publisher m_mapPublisher;
-  ros::Publisher m_mapDownsampledPublisher;
-  ros::Publisher m_mapColorShadingPublisher;
+  ros::Publisher slam_graph_marker_publisher_;
+  ros::Publisher map_publisher_;
+  ros::Publisher map_downsampled_publisher_;
+  ros::Publisher map_color_shading_publisher_;
 
-  tf::TransformListener m_tfListener;
+  std::string slam_map_frame_id_;
 
-  std::string m_slamMapFrameId;
+  double voxel_leaf_size_;
 
-  double m_voxelLeafSize;
+  float filter_limit_min_x_;
+  float filter_limit_max_x_;
+  float filter_limit_min_y_;
+  float filter_limit_max_y_;
+  float filter_limit_min_z_;
+  float filter_limit_max_z_;
 
-  float m_filterLimitMinX;
-  float m_filterLimitMaxX;
-  float m_filterLimitMinY;
-  float m_filterLimitMaxY;
-  float m_filterLimitMinZ;
-  float m_filterLimitMaxZ;
-
-  uint32_t m_runID;
-  uint32_t m_keyFrameCounter;
+  uint32_t run_id_;
+  uint32_t key_frame_counter_;
 
   typedef cloud_compression::OctreePointCloudCompression<PointType> Compression;
-  Compression::Ptr m_compression;
+  Compression::Ptr compression_;
 
-  std::vector<PointCloudPtr> m_keyFrameClouds;
-  std::vector<PointCloudPtr> m_keyFrameCloudsDownsampled;
+  std::vector<PointCloudPtr> key_frame_clouds_;
+  std::vector<PointCloudPtr> key_frame_clouds_downsampled_;
 
-  std::vector<pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr> m_keyFrameCloudsDownsampledNormals;
+  std::vector<pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr> key_frame_clouds_downsampled_normals_;
 
-  float m_minZ;
-  float m_maxZ;
+  float min_z_;
+  float max_z_;
 
-  std::vector<Eigen::Matrix4d> m_keyFrameTransforms;
+  std::vector<Eigen::Matrix4d> keyframe_transforms_;
 
-  mrs_laser_maps::synchronized_circular_buffer<mrs_laser_mapping::KeyFramePtr> m_keyframeBuffer;
-  boost::shared_ptr<boost::thread> m_processKeyframeThread;
+  mrs_laser_maps::synchronized_circular_buffer<mrs_laser_mapping::KeyFramePtr> keyframe_buffer_;
+  boost::shared_ptr<boost::thread> process_keyframe_thread_;
 
-  mrs_laser_maps::synchronized_circular_buffer<mrs_laser_mapping::KeyFrameTransformsPtr> m_keyframeTransformBuffer;
-  boost::shared_ptr<boost::thread> m_processKeyframeTransformThread;
+  mrs_laser_maps::synchronized_circular_buffer<mrs_laser_mapping::KeyFrameTransformsPtr> keyframe_transform_buffer_;
+  boost::shared_ptr<boost::thread> process_keyframe_transform_thread_;
 
-  boost::mutex m_keyframeMutex;
+  boost::mutex keyframe_mutex_;
 };
 }
 
