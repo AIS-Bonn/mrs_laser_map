@@ -45,7 +45,7 @@ Getting started
 
 Clone the repository in your catkin workspace (here ~/catkin_ws)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~{.sh}
-cd ~/catkin_ws/src # Or another path without spaces can be taken
+cd ~/catkin_ws/src 
 git clone https://github.com/AIS-Bonn/mrs_laser_map mrs_laser_map
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
