@@ -92,13 +92,11 @@ void ScanAssemblerNodelet::onInit()
   process_scan_thread_ = boost::thread(&ScanAssemblerNodelet::processScans, this);
 }
 
-// save new scan lines to buffer
 void ScanAssemblerNodelet::receivedLaserScan(const sensor_msgs::LaserScanConstPtr& msg)
 {
   scan_line_buffer_.push_front(*msg);
 }
 
-// accumulate scan lines to generate 360° point clouds
 void ScanAssemblerNodelet::processScans()
 {
   unsigned int scan_line_number = 0;
@@ -217,7 +215,7 @@ void ScanAssemblerNodelet::processScans()
     if (laser_yaw > M_PI)
       laser_yaw = -M_PI + (laser_yaw - M_PI);
 
-    // check for yaw for one specific scanner to know if a rotation is complete
+    // check for one scanner specified by scan_header_frame_id_ if a rotation is complete
     if (scan.header.frame_id == scan_header_frame_id_ && isScanComplete(laser_yaw))
     {
       pcl::PointCloud<OutputPointType>::Ptr output_cloud(new pcl::PointCloud<OutputPointType>());
@@ -247,7 +245,6 @@ void ScanAssemblerNodelet::processScans()
   }
 }
 
-// check if the scanner made a full rotation
 bool ScanAssemblerNodelet::isScanComplete(pcl::PointCloud<PointT>::Ptr scan_cloud)
 {
   if (scan_cloud->size() < 2)

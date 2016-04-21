@@ -445,9 +445,17 @@ bool MultiResolutionSurfelRegistration::registrationErrorFunctionLM(
       //		float weight = 1.0 / sqrt(it->error);
       //		float weight = it->weight * exp( -0.5 * (it->z - it->f).squaredNorm() * it->inv_sigma2 );
 
-      sumError += weight * it->error;
-      sumWeight += weight;
-      numMatches += 1.0;  // nweight;
+      
+      if (isnan(it->error) || isnan(weight))
+        ROS_DEBUG_STREAM_NAMED("surfel_registration","skipping nan values.");
+      else
+      {
+        sumError += weight * it->error;
+        sumWeight += weight;
+        numMatches += 1.0;  // nweight;
+      }
+      
+
 
       if (params.correspondences_source_points_)
       {
@@ -581,7 +589,7 @@ bool MultiResolutionSurfelRegistration::registrationErrorFunctionWithFirstAndSec
       const Eigen::Matrix<double, 6, 3> JtW = weight * it->df_dx.transpose() * it->W;
 
       if (isnan(it->error) || isnan(weight))
-        ROS_ERROR_STREAM("not ook");
+        ROS_DEBUG_STREAM_NAMED("surfel_registration","skipping nan values.");
       else
       {
         df += JtW * (it->z - it->f);

@@ -13,7 +13,7 @@
 		<param name="robot_name" value="mav_inventairy" />
 	</node>
 	
-	<node name="rviz_$(anon rviz)" pkg="rviz" type="rviz" args="-d $(find mrs_laser_mapping)/launch/mrs_laser_mapping.rviz" required="true" output="screen"/>
+  <node name="rviz_$(anon rviz)" pkg="rviz" type="rviz" args="-d $(find mrs_laser_mapping)/launch/mav_mapping.rviz" required="true" output="screen"/>
       
   <!-- filter for jump edges and -->    
   <node pkg="laser_filters" type="scan_to_scan_filter_chain" output="screen" name="laser_filter_1">
