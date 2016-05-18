@@ -10,6 +10,6 @@ scan_filter_chain:
 - name: self
   type: mod_laser_filters/ApproxSelfFilter
   params:
-    radius: 0.7
-    max_z: 0.5
-    min_z: -0.5
+    radius: 1.2
+    max_z: 1.5
+    min_z: -1.5

@@ -1,6 +1,7 @@
 <launch>
   <arg name="scan_assembler_frame_id" default="/base_link"/>
-  <arg name="bagfile" default="/data/bags/nsh_indoor_outdoor.bag"/>
+  <arg name="bagfile" default="/home/droeschel/bags/velodyne_kth/building_back_1.bag"/>
+  <arg name="bagfile_nsh" default="/home/droeschel/bags/nsh_indoor_outdoor.bag"/>
   <arg name="rate" default="0.25"/>
   <param name="/use_sim_time" value="true" />
 
@@ -11,15 +12,15 @@
   
   <node name="rviz_$(anon rviz)" pkg="rviz" type="rviz" args="-d $(find mrs_laser_mapping)/launch/velodyne_mapping.rviz" required="true" output="screen"/>
 	
-	<node pkg="tf" name="static_laser_transform" type="static_transform_publisher" args="0 0 0 0 0 0 1 base_link velodyne 10" /> 
+	<node if="0" pkg="tf" name="static_laser_transform" type="static_transform_publisher" args="0 0 0 0 0 0 1 base_link velodyne 10" /> 
 	
-	<node if="1" pkg="rosbag" type="play" name="play" args="-r $(arg rate) --clock --start=0 -d 0 $(arg bagfile)" output="screen" respawn="false" />
+	<node if="1" pkg="rosbag" type="play" name="play" args="-r $(arg rate) --clock --start=0 -d 0 -u 20 $(arg bagfile)" output="screen" respawn="false" />
 
 	<node pkg="nodelet" type="nodelet" name="mapping_nodelet"  args="manager" output="screen"/>
 		
 	<!-- local mapping -->
-	<node pkg="nodelet" type="nodelet" name="map_nodelet" args="load mrs_laser_mapping/map_nodelet mapping_nodelet" output="screen" >
-		<remap from="~input" to="/velodyne_points" />
+	<node if="1"  pkg="nodelet" type="nodelet" name="map_nodelet" args="load mrs_laser_mapping/map_nodelet mapping_nodelet" output="screen" >
+		<remap from="~input" to="/velodyne_points_crop" />
 	
 		<!-- frame id in which the scanlines are assembled -->
 		<param name="scan_assembler_frame_id" type="str" value="$(arg scan_assembler_frame_id)" />
@@ -28,7 +29,7 @@
 		<param name="sensor_frame_id" type="str" value="/velodyne" />
 			
     <!-- first n scans are not registered to the map (e.g if robot is standing) -->
-	  <param name="min_scans_registration" type="int" value="0" />
+	  <param name="min_scans_registration" type="int" value="2" />
 	  
 	  <!-- first n local maps are not published to the global mapping (to avoid sparse maps in alloc. map) -->
 		<param name="min_scans_for_map_publishing" type="int" value="8" />
@@ -47,7 +48,7 @@
     <param name="map_size" type="int" value="128" />
     <param name="map_resolution" type="double" value="16.0" />
     <param name="map_levels" type="int" value="4" />
-    <param name="map_cellCapacity" type="int" value="2500" />
+    <param name="map_cell_capacity" type="int" value="2500" />
 
     <!-- parameters for downsampled map (for visualization) -->
     <param name="map_downsampled_size" type="int" value="8" />
@@ -72,6 +73,24 @@
       filter_limit_negative: False
     </rosparam>
   </node>
+  
+  <!-- Run a passthrough filter to cut ceiling -->
+  <node pkg="nodelet" type="nodelet" name="cropbox" args="load pcl/CropBox mapping_nodelet" output="screen">
+    <remap from="~input" to="/velodyne_points" />
+    <remap from="~output" to="/velodyne_points_crop" />
+    <rosparam>
+      min_x: -2.0
+      max_x: 2.0
+      min_y: -1.0
+      max_y: 1.0
+      min_z: -1.0
+      max_z: 1.0
+      negative: True
+    </rosparam>
+  </node>
 
+   <node pkg="nodelet" type="nodelet" name="box_filter" args="load load mod_laser_filters/box_filter_nodelet mapping_nodelet" output="screen"/>
+
+  
 </launch>
 		

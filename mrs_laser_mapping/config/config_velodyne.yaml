@@ -5,7 +5,7 @@ mapping_nodelet:
   occ_clamping_thresh_min: -2
   occ_prob_hit: 0.85
   occ_prob_miss: -0.4
-  occ_update: 0
+  occ_update: 1
   shadow_filter_cutoff: 1.5
   show_self_filter_markers: 0
   torso_cutoff_max_x: 0.65
