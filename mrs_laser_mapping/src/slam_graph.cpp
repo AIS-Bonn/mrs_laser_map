@@ -32,20 +32,19 @@
  *  ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  *  POSSIBILITY OF SUCH DAMAGE.
  *
- *  Author: Jörg Stückler, David Droeschel (droeschel@ais.uni-bonn.de)
+ *  Author: David Droeschel (droeschel@ais.uni-bonn.de), Jörg Stückler
  */
 
-#include <mrsmap/slam.h>
+#include <mrs_laser_mapping/slam_graph.h>
 
+#include <ros/console.h>
+#include <ros/assert.h>
 #include <pcl/registration/transforms.h>
 
 #include <pcl/segmentation/extract_polygonal_prism_data.h>
 #include <pcl/surface/convex_hull.h>
 
 #include <g2o/core/optimization_algorithm_levenberg.h>
-
-using namespace mrs_laser_maps;
-using namespace mrsmap;
 
 #define GRADIENT_ITS 100
 #define NEWTON_FEAT_ITS 0
@@ -58,18 +57,20 @@ using namespace mrsmap;
 
 #define REGISTER_TWICE 0
 
-SLAM::SLAM()
+namespace mrs_laser_mapping
+{
+
+SlamGraph::SlamGraph()
 {
   ROS_INFO("SLAM::SLAM()");
   srand(time(NULL));
 
-  referenceKeyFrameId_ = 0;
-  lastTransform_.setIdentity();
-  lastFrameTransform_.setIdentity();
+  reference_node_id_ = 0;
+  last_transform_.setIdentity();
 
   // allocating the optimizer
   optimizer_ = new g2o::SparseOptimizer();
-  optimizer_->setVerbose(true);
+  optimizer_->setVerbose(false);
   SlamLinearSolver* linearSolver = new SlamLinearSolver();
   linearSolver->setBlockOrdering(false);
   SlamBlockSolver* solver = new SlamBlockSolver(linearSolver);
@@ -77,64 +78,73 @@ SLAM::SLAM()
   g2o::OptimizationAlgorithmLevenberg* solverLevenberg = new g2o::OptimizationAlgorithmLevenberg(solver);
 
   optimizer_->setAlgorithm(solverLevenberg);
+  
+  mrs_laser_maps::RegistrationParameters params;
+  params.prior_prob_ = 0.9;
+  params.sigma_size_factor_ = 0.25;
+  params.soft_assoc_c1_ = 1.0;
+  params.soft_assoc_c2_ = 8.0;
+  params.associate_once_ = false;
+  params.max_iterations_ = 100;
+  setRegistrationParameters(params);
 
-  maxIterations_ = 100;
+  pose_is_close_dist_ = 1.0;
+  pose_is_close_angle_ = 0.5;
+  pose_is_far_dist_ = 1.7;
 
-  priorProb_ = 0.9;
-  softAssocC1_ = 1.0;
-  softAssocC2_ = 8;
-  sigmaSizeFactor_ = 0.25;
-  associateOnce_ = false;
-
-  poseIsCloseDist_ = 1.0;
-  poseIsCloseAngle_ = 0.5;
-  poseIsFarDist_ = 1.7;
-
-  addKeyFrameByDistance_ = true;
-  addKeyFrame_ = false;
-  firstFrame_ = true;
+  add_nodes_by_distance_ = true;
+  add_node_manual_ = false;
+  first_frame_ = true;
 }
 
-SLAM::~SLAM()
+SlamGraph::~SlamGraph()
 {
   delete optimizer_;
 }
 
-unsigned int SLAM::addKeyFrame(unsigned int kf_prev_id, boost::shared_ptr<KeyFrame>& keyFrame,
+
+void SlamGraph::setRegistrationParameters(const mrs_laser_maps::RegistrationParameters& params)
+{
+  surfel_registration_.setRegistrationParameters(params);
+}
+
+
+unsigned int SlamGraph::addKeyFrame(unsigned int kf_prev_id, GraphNodePtr& keyFrame,
                                const Eigen::Matrix4d& transform)
 {
-  keyFrame->nodeId_ = optimizer_->vertices().size();
+  keyFrame->node_id_ = optimizer_->vertices().size();
 
   // anchor first frame at origin
-  if (keyFrames_.empty())
+  if (graph_nodes_.empty())
   {
     g2o::VertexSE3* v = new g2o::VertexSE3();
-    v->setId(keyFrame->nodeId_);
+    v->setId(keyFrame->node_id_);
     v->setEstimate(g2o::SE3Quat());
     v->setFixed(true);
     optimizer_->addVertex(v);
-    keyFrames_.push_back(keyFrame);
-    keyFrameNodeMap_[keyFrame->nodeId_] = keyFrame;
+    graph_nodes_.push_back(keyFrame);
+    graph_nodes_map_[keyFrame->node_id_] = keyFrame;
   }
   else
   {
     g2o::SE3Quat measurement_mean(Eigen::Quaterniond(transform.block<3, 3>(0, 0)), transform.block<3, 1>(0, 3));
 
-    g2o::VertexSE3* v_prev = dynamic_cast<g2o::VertexSE3*>(optimizer_->vertex(keyFrames_[kf_prev_id]->nodeId_));
+    g2o::VertexSE3* v_prev = dynamic_cast<g2o::VertexSE3*>(optimizer_->vertex(graph_nodes_[kf_prev_id]->node_id_));
 
     // create vertex in slam graph for new key frame
     g2o::VertexSE3* v = new g2o::VertexSE3();
-    v->setId(keyFrame->nodeId_);
+    v->setId(keyFrame->node_id_);
     v->setEstimate(v_prev->estimate() * measurement_mean);
     optimizer_->addVertex(v);
-    keyFrames_.push_back(keyFrame);
-    keyFrameNodeMap_[keyFrame->nodeId_] = keyFrame;
+    graph_nodes_.push_back(keyFrame);
+    graph_nodes_map_[keyFrame->node_id_] = keyFrame;
   }
 
-  return keyFrames_.size() - 1;
+  return graph_nodes_.size() - 1;
 }
 
-bool SLAM::addEdge(unsigned int v1_id, unsigned int v2_id)
+
+bool SlamGraph::addEdge(unsigned int v1_id, unsigned int v2_id)
 {
   g2o::VertexSE3* v1 = dynamic_cast<g2o::VertexSE3*>(optimizer_->vertex(v1_id));
   g2o::VertexSE3* v2 = dynamic_cast<g2o::VertexSE3*>(optimizer_->vertex(v2_id));
@@ -146,30 +156,21 @@ bool SLAM::addEdge(unsigned int v1_id, unsigned int v2_id)
   return addEdge(v1_id, v2_id, diffTransform);
 }
 
-bool SLAM::addEdge(unsigned int v1_id, unsigned int v2_id, const Eigen::Matrix4d& transformGuess)
+
+bool SlamGraph::addEdge(unsigned int v1_id, unsigned int v2_id, const Eigen::Matrix4d& transform_guess)
 {
-  Eigen::Matrix4d transform = transformGuess;
+  Eigen::Matrix4d transform = transform_guess;
 
   Eigen::Matrix<double, 6, 6> poseCov;
 
   // TODO: register maps with pose guess from graph
-  pcl::PointCloud<pcl::PointXYZRGB>::Ptr corrSrc;
-  pcl::PointCloud<pcl::PointXYZRGB>::Ptr corrTgt;
-  MultiResolutionSurfelRegistration reg;
-  reg.prior_prob_ = priorProb_;
-  reg.soft_assoc_c1_ = softAssocC1_;
-  reg.soft_assoc_c2_ = softAssocC2_;
-  reg.sigma_size_factor_ = sigmaSizeFactor_;
-  reg.associate_once_ = associateOnce_;
-
-  bool retVal = reg.estimateTransformationLevenbergMarquardt(keyFrameNodeMap_[v1_id]->map_.get(),
-                                                             keyFrameNodeMap_[v2_id]->map_.get(), transform, corrSrc,
-                                                             corrTgt, maxIterations_);
+  bool retVal = surfel_registration_.estimateTransformationLevenbergMarquardt(graph_nodes_map_[v1_id]->map_.get(),
+                                                             graph_nodes_map_[v2_id]->map_.get(), transform );
 
   if (!retVal)
     return false;
 
-  retVal = reg.estimatePoseCovariance(poseCov, keyFrameNodeMap_[v1_id]->map_.get(), keyFrameNodeMap_[v2_id]->map_.get(),
+  retVal = surfel_registration_.estimatePoseCovariance(poseCov, graph_nodes_map_[v1_id]->map_.get(), graph_nodes_map_[v2_id]->map_.get(),
                                       transform);
 
   if (!retVal)
@@ -180,7 +181,8 @@ bool SLAM::addEdge(unsigned int v1_id, unsigned int v2_id, const Eigen::Matrix4d
 }
 
 // returns true, iff node could be added to the cloud
-bool SLAM::addEdge(unsigned int v1_id, unsigned int v2_id, const Eigen::Matrix4d& transform,
+
+bool SlamGraph::addEdge(unsigned int v1_id, unsigned int v2_id, const Eigen::Matrix4d& transform,
                    const Eigen::Matrix<double, 6, 6>& covariance)
 {
   g2o::SE3Quat measurement_mean(Eigen::Quaterniond(transform.block<3, 3>(0, 0)), transform.block<3, 1>(0, 3));
@@ -202,129 +204,100 @@ bool SLAM::addEdge(unsigned int v1_id, unsigned int v2_id, const Eigen::Matrix4d
   return optimizer_->addEdge(edge);
 }
 
-bool SLAM::poseIsClose(const Eigen::Matrix4d& transform)
+
+bool SlamGraph::poseIsClose(const Eigen::Matrix4d& transform)
 {
   // 	double angle = Eigen::AngleAxisd( transform.block< 3, 3 >( 0, 0 ) ).angle();
   double dist = transform.block<3, 1>(0, 3).norm();
 
-  return dist < poseIsCloseDist_;  // fabsf( angle ) < poseIsCloseAngle_ && dist < poseIsCloseDist_;
+  return dist < pose_is_close_dist_;  // fabsf( angle ) < poseIsCloseAngle_ && dist < poseIsCloseDist_;
 }
 
-bool SLAM::poseIsFar(const Eigen::Matrix4d& transform)
+
+bool SlamGraph::poseIsFar(const Eigen::Matrix4d& transform)
 {
   // 	double angle = Eigen::AngleAxisd( transform.block< 3, 3 >( 0, 0 ) ).angle();
   double dist = transform.block<3, 1>(0, 3).norm();
 
-  return dist > poseIsFarDist_;
+  return dist > pose_is_far_dist_;
 }
 
-bool SLAM::update(boost::shared_ptr<mrs_laser_maps::MapType> view, pcl::PointCloud<MapPointType>::Ptr cloud,
-                  bool localizeOnly)
+
+bool SlamGraph::update(MapPtr local_map)
 {
-  //	const int numPoints = pointCloudIn->points.size();
-  //
-  //	std::vector< int > indices( numPoints );
-  //	for( int i = 0; i < numPoints; i++ )
-  //		indices[ i ] = i;
+  pcl::StopWatch stop_watch;
+  
+  bool add_new_node = false;
 
-  MultiResolutionSurfelRegistration reg;
-  reg.prior_prob_ = priorProb_;
-  reg.soft_assoc_c1_ = softAssocC1_;
-  reg.soft_assoc_c2_ = softAssocC2_;
-  reg.sigma_size_factor_ = sigmaSizeFactor_;
-  reg.associate_once_ = associateOnce_;
-
-  // 	ROS_INFO_STREAM( "------------ SLAM::update: " << view->getNumCellPoints() );
-
-  bool generateKeyFrame = false;
-
-  if (keyFrames_.empty())
+  if (graph_nodes_.empty())
   {
-    generateKeyFrame = true;
+    add_new_node = true;
   }
   else
   {
-    Eigen::Matrix4d incTransform = lastTransform_;
+    Eigen::Matrix4d inc_transform = last_transform_;
+    
+    bool ret_val = false;
+    ret_val = surfel_registration_.estimateTransformationLevenbergMarquardt(graph_nodes_[reference_node_id_]->map_.get(), local_map.get(),
+                                                          inc_transform);
+    ROS_DEBUG_STREAM_NAMED("slam", "registration took: " << stop_watch.getTime());
 
-    bool retVal = false;
-
-    //		// TODO!! Remove! should already be evaluated
-    //		keyFrames_[ referenceKeyFrameId_ ]->map_.get()->evaluateAll();
-    //		view.get()->evaluateAll();
-    ros::Time timeBeforeRegister = ros::Time::now();
-    pcl::PointCloud<pcl::PointXYZRGB>::Ptr corrSrc;
-    pcl::PointCloud<pcl::PointXYZRGB>::Ptr corrTgt;
-    ROS_DEBUG_STREAM_NAMED("slam", "transform before: " << incTransform);
-    retVal = reg.estimateTransformationLevenbergMarquardt(keyFrames_[referenceKeyFrameId_]->map_.get(), view.get(),
-                                                          incTransform, corrSrc, corrTgt, maxIterations_);
-    ROS_DEBUG_STREAM_NAMED("slam", "transform after: " << incTransform);
-    ROS_DEBUG_STREAM_NAMED("slam", "registration took: " << ros::Time::now() - timeBeforeRegister);
-    //		retVal = true;
-    if (retVal)
+    if (ret_val)
     {
-      lastTransform_ = incTransform;
+      last_transform_ = inc_transform;
 
-      // check for sufficient pose delta to generate a new key frame
-
-      if (!poseIsClose(lastTransform_))
+      // check for sufficient pose delta to generate a new node
+      if (!poseIsClose(last_transform_))
       {
-        generateKeyFrame = true;
+        add_new_node = true;
       }
     }
     else
     {
-      ROS_ERROR_STREAM("SLAM: lost track in current frame. referenceKeyFrameId_ = " << referenceKeyFrameId_);
+      ROS_ERROR_STREAM("SLAM: lost track in current frame. reference_node_id_ = " << reference_node_id_);
       // exit( -1 );
       return false;
     }
   }
 
-  if (addKeyFrameByDistance_ || addKeyFrame_ || firstFrame_)
+  if (add_nodes_by_distance_ || add_node_manual_ || first_frame_)
   {
-    if (generateKeyFrame || addKeyFrame_)
+    if (add_new_node || add_node_manual_)
     {
-      boost::shared_ptr<KeyFrame> keyFrame = boost::shared_ptr<KeyFrame>(new KeyFrame());
+      GraphNodePtr node = boost::make_shared<GraphNode>();
 
-      boost::shared_ptr<mrs_laser_maps::MapType> map =
-          boost::shared_ptr<mrs_laser_maps::MapType>(new mrs_laser_maps::MapType(*view.get()));
-      map->evaluateAll();
-      keyFrame->map_ = map;
-      // keyFrame->cloud_ = pcl::PointCloud< pcl::PointXYZ>::ConstPtr(new pcl::PointCloud< pcl::PointXYZ>(cloud) );
-      keyFrame->cloud_ = cloud;
-
-      ROS_DEBUG_STREAM_NAMED("slam", "------------generate keyframe");
+      local_map->evaluateAll();
+      node->map_ = local_map;
+      
+      ROS_DEBUG_STREAM_NAMED("slam", "adding new node");
 
       // TODO: evaluate pose covariance between keyframes..
-      Eigen::Matrix<double, 6, 6> poseCov = Eigen::Matrix<double, 6, 6>::Identity();
+      Eigen::Matrix<double, 6, 6> pose_cov = Eigen::Matrix<double, 6, 6>::Identity();
 
-      if (!keyFrames_.empty())
+      if (!graph_nodes_.empty())
       {
-        reg.estimatePoseCovariance(poseCov, keyFrames_[referenceKeyFrameId_]->map_.get(), keyFrame->map_.get(),
-                                   lastTransform_);
-
-        //  				ROS_INFO_STREAM("slam: covariance " << poseCov << " lastTransform_: " << lastTransform_);
-
-        //			poseCov.setIdentity();
+        surfel_registration_.estimatePoseCovariance(pose_cov, graph_nodes_[reference_node_id_]->map_.get(), node->map_.get(),
+                                   last_transform_);
       }
       else
-        poseCov.setZero();
+        pose_cov.setZero();
 
       // extend slam graph with vertex for new key frame and with one edge towards the last keyframe..
-      unsigned int keyFrameId = addKeyFrame(referenceKeyFrameId_, keyFrame, lastTransform_);
+      unsigned int vertex_id = addKeyFrame(reference_node_id_, node, last_transform_);
       if (optimizer_->vertices().size() > 1)
       {
-        if (!addEdge(keyFrames_[referenceKeyFrameId_]->nodeId_, keyFrames_[keyFrameId]->nodeId_, lastTransform_,
-                     poseCov))
+        if (!addEdge(graph_nodes_[reference_node_id_]->node_id_, graph_nodes_[vertex_id]->node_id_, last_transform_,
+                     pose_cov))
         {
           ROS_WARN("WARNING: new key frame not connected to graph!");
           ROS_ASSERT(false);
         }
       }
 
-      ROS_ASSERT(optimizer_->vertices().size() == keyFrames_.size());
+      ROS_ASSERT(optimizer_->vertices().size() == graph_nodes_.size());
 
-      addKeyFrame_ = false;
-      firstFrame_ = false;
+      add_node_manual_ = false;
+      first_frame_ = false;
     }
 
     //  		refine(3,10,100,100);
@@ -346,10 +319,10 @@ bool SLAM::update(boost::shared_ptr<mrs_laser_maps::MapType> view, pcl::PointClo
   }
 
   // get estimated transform in map frame
-  unsigned int oldReferenceId_ = referenceKeyFrameId_;
-  g2o::VertexSE3* v_ref_old = dynamic_cast<g2o::VertexSE3*>(optimizer_->vertex(keyFrames_[oldReferenceId_]->nodeId_));
+  unsigned int old_reference_id = reference_node_id_;
+  g2o::VertexSE3* v_ref_old = dynamic_cast<g2o::VertexSE3*>(optimizer_->vertex(graph_nodes_[old_reference_id]->node_id_));
   Eigen::Matrix4d pose_ref_old = v_ref_old->estimate().matrix();
-  Eigen::Matrix4d tracked_pose = pose_ref_old * lastTransform_;
+  Eigen::Matrix4d tracked_pose = pose_ref_old * last_transform_;
 
   unsigned int bestId = optimizer_->vertices().size() - 1;
 
@@ -357,9 +330,9 @@ bool SLAM::update(boost::shared_ptr<mrs_laser_maps::MapType> view, pcl::PointClo
   // in this way, we do not create unnecessary key frames..
   // 	float bestAngle = std::numeric_limits< float >::max();
   float bestDist = std::numeric_limits<float>::max();
-  for (unsigned int kf_id = 0; kf_id < keyFrames_.size(); kf_id++)
+  for (unsigned int kf_id = 0; kf_id < graph_nodes_.size(); kf_id++)
   {
-    g2o::VertexSE3* v = dynamic_cast<g2o::VertexSE3*>(optimizer_->vertex(keyFrames_[kf_id]->nodeId_));
+    g2o::VertexSE3* v = dynamic_cast<g2o::VertexSE3*>(optimizer_->vertex(graph_nodes_[kf_id]->node_id_));
 
     Eigen::Matrix4d v_pose = v->estimate().matrix();
 
@@ -378,24 +351,26 @@ bool SLAM::update(boost::shared_ptr<mrs_laser_maps::MapType> view, pcl::PointClo
   // try to add new edge between the two reference
   // if not possible, we keep the old reference frame such that a new key frame will added later that connects the two
   // reference frames
-  bool switchReferenceID = true;
-  g2o::VertexSE3* v_ref = dynamic_cast<g2o::VertexSE3*>(optimizer_->vertex(keyFrames_[referenceKeyFrameId_]->nodeId_));
+  bool switch_reference_id = true;
+  g2o::VertexSE3* v_ref = dynamic_cast<g2o::VertexSE3*>(optimizer_->vertex(graph_nodes_[reference_node_id_]->node_id_));
 
-  if (switchReferenceID)
+  if (switch_reference_id)
   {
-    referenceKeyFrameId_ = bestId;
+    reference_node_id_ = bestId;
     ROS_DEBUG_STREAM_NAMED("slam", "switched reference keyframe");
   }
 
   // set lastTransform_ to pose wrt reference key frame
-  v_ref = dynamic_cast<g2o::VertexSE3*>(optimizer_->vertex(keyFrames_[referenceKeyFrameId_]->nodeId_));
+  v_ref = dynamic_cast<g2o::VertexSE3*>(optimizer_->vertex(graph_nodes_[reference_node_id_]->node_id_));
   Eigen::Matrix4d pose_ref = v_ref->estimate().matrix();
-  lastTransform_ = pose_ref.inverse() * tracked_pose;
+  last_transform_ = pose_ref.inverse() * tracked_pose;
 
+  ROS_DEBUG_STREAM_NAMED("slam", "update took: " << stop_watch.getTime() << " ms");
   return true;
 }
 
-bool SLAM::setPose(const Eigen::Matrix4d& poseUpdate)
+
+bool SlamGraph::setPose(const Eigen::Matrix4d& poseUpdate)
 {
   unsigned int bestId = optimizer_->vertices().size() - 1;
 
@@ -403,9 +378,9 @@ bool SLAM::setPose(const Eigen::Matrix4d& poseUpdate)
   // in this way, we do not create unnecessary key frames..
   // 	float bestAngle = std::numeric_limits< float >::max();
   float bestDist = std::numeric_limits<float>::max();
-  for (unsigned int kf_id = 0; kf_id < keyFrames_.size(); kf_id++)
+  for (unsigned int kf_id = 0; kf_id < graph_nodes_.size(); kf_id++)
   {
-    g2o::VertexSE3* v = dynamic_cast<g2o::VertexSE3*>(optimizer_->vertex(keyFrames_[kf_id]->nodeId_));
+    g2o::VertexSE3* v = dynamic_cast<g2o::VertexSE3*>(optimizer_->vertex(graph_nodes_[kf_id]->node_id_));
 
     Eigen::Matrix4d v_pose = v->estimate().matrix();
 
@@ -425,24 +400,25 @@ bool SLAM::setPose(const Eigen::Matrix4d& poseUpdate)
   // try to add new edge between the two reference
   // if not possible, we keep the old reference frame such that a new key frame will added later that connects the two
   // reference frames
-  bool switchReferenceID = true;
-  g2o::VertexSE3* v_ref = dynamic_cast<g2o::VertexSE3*>(optimizer_->vertex(keyFrames_[referenceKeyFrameId_]->nodeId_));
+  bool switch_reference_id = true;
+  g2o::VertexSE3* v_ref = dynamic_cast<g2o::VertexSE3*>(optimizer_->vertex(graph_nodes_[reference_node_id_]->node_id_));
 
-  if (switchReferenceID)
+  if (switch_reference_id)
   {
-    referenceKeyFrameId_ = bestId;
+    reference_node_id_ = bestId;
     ROS_DEBUG_STREAM_NAMED("slam", "switching reference keyframe id ");
   }
 
   // set lastTransform_ to pose wrt reference key frame
-  v_ref = dynamic_cast<g2o::VertexSE3*>(optimizer_->vertex(keyFrames_[referenceKeyFrameId_]->nodeId_));
+  v_ref = dynamic_cast<g2o::VertexSE3*>(optimizer_->vertex(graph_nodes_[reference_node_id_]->node_id_));
   Eigen::Matrix4d pose_ref = v_ref->estimate().matrix();
-  lastTransform_ = pose_ref.inverse() * poseUpdate;
+  last_transform_ = pose_ref.inverse() * poseUpdate;
 
   return true;
 }
 
-void SLAM::connectClosePoses(bool random)
+
+void SlamGraph::connectClosePoses(bool random)
 {
   // random == true: randomly check only one vertex, the closer, the more probable the check
   if (random)
@@ -450,52 +426,52 @@ void SLAM::connectClosePoses(bool random)
     const double sigma2_dist = 0.7 * 0.7;
     const double sigma2_angle = 0.3 * 0.3;
 
-    for (unsigned int kf1_id = referenceKeyFrameId_; kf1_id <= referenceKeyFrameId_; kf1_id++)
+    for (unsigned int kf1_id = reference_node_id_; kf1_id <= reference_node_id_; kf1_id++)
     {
-      int v1_id = keyFrames_[kf1_id]->nodeId_;
+      int v1_id = graph_nodes_[kf1_id]->node_id_;
       g2o::VertexSE3* v1 = dynamic_cast<g2o::VertexSE3*>(optimizer_->vertex(v1_id));
 
       std::vector<int> vertices;
       std::vector<double> probs;
-      double sumProbs = 0.0;
+      double sum_probs = 0.0;
 
       for (unsigned int kf2_id = 0; kf2_id < kf1_id; kf2_id++)
       {
-        int v2_id = keyFrames_[kf2_id]->nodeId_;
+        int v2_id = graph_nodes_[kf2_id]->node_id_;
         g2o::VertexSE3* v2 = dynamic_cast<g2o::VertexSE3*>(optimizer_->vertex(v2_id));
 
         // check if edge already exists between the vertices
-        bool foundEdge = false;
+        bool found_edge = false;
         for (EdgeSet::iterator it = v1->edges().begin(); it != v1->edges().end(); ++it)
         {
           g2o::EdgeSE3* edge = dynamic_cast<g2o::EdgeSE3*>(*it);
           if ((edge->vertices()[0]->id() == v1_id && edge->vertices()[1]->id() == v2_id) ||
               (edge->vertices()[0]->id() == v2_id && edge->vertices()[1]->id() == v1_id))
           {
-            foundEdge = true;
+            found_edge = true;
             break;
           }
         }
-        if (foundEdge)
+        if (found_edge)
           continue;
 
         // diff transform from v2 to v1
-        Eigen::Matrix4d diffTransform = (v1->estimate().inverse() * v2->estimate()).matrix();
+        Eigen::Matrix4d diff_transform = (v1->estimate().inverse() * v2->estimate()).matrix();
 
-        if (poseIsFar(diffTransform))
+        if (poseIsFar(diff_transform))
           continue;
 
-        double angle = Eigen::AngleAxisd(diffTransform.block<3, 3>(0, 0)).angle();
-        double dist = diffTransform.block<3, 1>(0, 3).norm();
+        double angle = Eigen::AngleAxisd(diff_transform.block<3, 3>(0, 0)).angle();
+        double dist = diff_transform.block<3, 1>(0, 3).norm();
 
         // probability of drawing v2 to check for an edge
-        double probDist = exp(-0.5 * dist * dist / sigma2_dist);
-        double probAngle = exp(-0.5 * angle * angle / sigma2_angle);
+        double prob_dist = exp(-0.5 * dist * dist / sigma2_dist);
+        double prob_angle = exp(-0.5 * angle * angle / sigma2_angle);
 
-        if (probDist > 0.1 && probAngle > 0.1)
+        if (prob_dist > 0.1 && prob_angle > 0.1)
         {
-          sumProbs += probDist * probAngle;
-          probs.push_back(sumProbs);
+          sum_probs += prob_dist * prob_angle;
+          probs.push_back(sum_probs);
           vertices.push_back(v2_id);
         }
       }
@@ -504,15 +480,15 @@ void SLAM::connectClosePoses(bool random)
         continue;
 
       // draw random number in [0,sumProbs]
-      double checkProb = static_cast<double>(rand()) / static_cast<double>((RAND_MAX + 1.0) * sumProbs);
+      double check_prob = static_cast<double>(rand()) / static_cast<double>((RAND_MAX + 1.0) * sum_probs);
       for (unsigned int i = 0; i < vertices.size(); i++)
       {
-        if (checkProb <= probs[i])
+        if (check_prob <= probs[i])
         {
           int v2_id = vertices[i];
           g2o::VertexSE3* v2 = dynamic_cast<g2o::VertexSE3*>(optimizer_->vertex(v2_id));
-          Eigen::Matrix4d diffTransform = (v1->estimate().inverse() * v2->estimate()).matrix();
-          addEdge(v1_id, v2_id, diffTransform);
+          Eigen::Matrix4d diff_transform = (v1->estimate().inverse() * v2->estimate()).matrix();
+          addEdge(v1_id, v2_id, diff_transform);
           break;
         }
       }
@@ -521,47 +497,48 @@ void SLAM::connectClosePoses(bool random)
   else
   {
     // add all new edges to slam graph
-    for (unsigned int kf1_id = 0; kf1_id < keyFrames_.size(); kf1_id++)
+    for (unsigned int kf1_id = 0; kf1_id < graph_nodes_.size(); kf1_id++)
     {
       for (unsigned int kf2_id = 0; kf2_id < kf1_id; kf2_id++)
       {
-        int v1_id = keyFrames_[kf1_id]->nodeId_;
-        int v2_id = keyFrames_[kf2_id]->nodeId_;
+        int v1_id = graph_nodes_[kf1_id]->node_id_;
+        int v2_id = graph_nodes_[kf2_id]->node_id_;
         g2o::VertexSE3* v1 = dynamic_cast<g2o::VertexSE3*>(optimizer_->vertex(v1_id));
         g2o::VertexSE3* v2 = dynamic_cast<g2o::VertexSE3*>(optimizer_->vertex(v2_id));
 
         // check if edge already exists between the vertices
-        bool foundEdge = false;
+        bool found_edge = false;
         for (EdgeSet::iterator it = v1->edges().begin(); it != v1->edges().end(); ++it)
         {
           g2o::EdgeSE3* edge = dynamic_cast<g2o::EdgeSE3*>(*it);
           if ((edge->vertices()[0]->id() == v1_id && edge->vertices()[1]->id() == v2_id) ||
               (edge->vertices()[0]->id() == v2_id && edge->vertices()[1]->id() == v1_id))
           {
-            foundEdge = true;
+            found_edge = true;
             break;
           }
         }
-        if (foundEdge)
+        if (found_edge)
           continue;
 
         // check if poses close
         // diff transform from v2 to v1
-        Eigen::Matrix4d diffTransform = (v1->estimate().inverse() * v2->estimate()).matrix();
-        if (poseIsFar(diffTransform))
+        Eigen::Matrix4d diff_transform = (v1->estimate().inverse() * v2->estimate()).matrix();
+        if (poseIsFar(diff_transform))
         {
           // ROS_INFO("pose to far");
           continue;
         }
         ROS_DEBUG_STREAM_NAMED("slam", "adding edge between " << v1_id << " and " << v2_id << " with "
-                                                              << diffTransform);
-        addEdge(v1_id, v2_id, diffTransform);
+                                                              << diff_transform);
+        addEdge(v1_id, v2_id, diff_transform);
       }
     }
   }
 }
 
-bool SLAM::refineEdge(g2o::EdgeSE3* edge, float register_start_resolution, float register_stop_resolution)
+
+bool SlamGraph::refineEdge(g2o::EdgeSE3* edge, float register_start_resolution, float register_stop_resolution)
 {
   unsigned int v1_id = edge->vertices()[0]->id();
   unsigned int v2_id = edge->vertices()[1]->id();
@@ -569,46 +546,38 @@ bool SLAM::refineEdge(g2o::EdgeSE3* edge, float register_start_resolution, float
   g2o::VertexSE3* v1 = dynamic_cast<g2o::VertexSE3*>(optimizer_->vertex(v1_id));
   g2o::VertexSE3* v2 = dynamic_cast<g2o::VertexSE3*>(optimizer_->vertex(v2_id));
 
-  Eigen::Matrix4d diffTransform = (v1->estimate().inverse() * v2->estimate()).matrix();
+  Eigen::Matrix4d diff_transform = (v1->estimate().inverse() * v2->estimate()).matrix();
 
   // register maps with pose guess from graph
-  Eigen::Matrix<double, 6, 6> poseCov;
+  Eigen::Matrix<double, 6, 6> pose_cov;
 
-  if (keyFrameNodeMap_.find(v1_id) == keyFrameNodeMap_.end() || keyFrameNodeMap_.find(v2_id) == keyFrameNodeMap_.end())
+  if (graph_nodes_map_.find(v1_id) == graph_nodes_map_.end() || graph_nodes_map_.find(v2_id) == graph_nodes_map_.end())
     return true;  // dont delete this edge!
 
-  pcl::PointCloud<pcl::PointXYZRGB>::Ptr corrSrc;
-  pcl::PointCloud<pcl::PointXYZRGB>::Ptr corrTgt;
-  MultiResolutionSurfelRegistration reg;
-  reg.prior_prob_ = priorProb_;
-  reg.soft_assoc_c1_ = softAssocC1_;
-  reg.soft_assoc_c2_ = softAssocC2_;
-  reg.sigma_size_factor_ = sigmaSizeFactor_;
-  reg.associate_once_ = associateOnce_;
 
-  bool retVal = reg.estimateTransformationLevenbergMarquardt(keyFrameNodeMap_[v1_id]->map_.get(),
-                                                             keyFrameNodeMap_[v2_id]->map_.get(), diffTransform,
-                                                             corrSrc, corrTgt, maxIterations_);
+  bool ret_val = surfel_registration_.estimateTransformationLevenbergMarquardt(graph_nodes_map_[v1_id]->map_.get(),
+                                                             graph_nodes_map_[v2_id]->map_.get(), diff_transform);
 
-  if (!retVal)
+  if (!ret_val)
     return false;
 
-  retVal &= reg.estimatePoseCovariance(poseCov, keyFrameNodeMap_[v1_id]->map_.get(),
-                                       keyFrameNodeMap_[v2_id]->map_.get(), diffTransform);
+  ret_val &= surfel_registration_.estimatePoseCovariance(pose_cov, graph_nodes_map_[v1_id]->map_.get(),
+                                       graph_nodes_map_[v2_id]->map_.get(), diff_transform);
 
-  if (retVal)
+  if (ret_val)
   {
-    g2o::SE3Quat measurement_mean(Eigen::Quaterniond(diffTransform.block<3, 3>(0, 0)), diffTransform.block<3, 1>(0, 3));
-    Eigen::Matrix<double, 6, 6> measurement_information = poseCov.inverse();
+    g2o::SE3Quat measurement_mean(Eigen::Quaterniond(diff_transform.block<3, 3>(0, 0)), diff_transform.block<3, 1>(0, 3));
+    Eigen::Matrix<double, 6, 6> measurement_information = pose_cov.inverse();
 
     edge->setMeasurement(measurement_mean);
     edge->setInformation(measurement_information);
   }
 
-  return retVal;
+  return ret_val;
 }
 
-void SLAM::refine(unsigned int refineIterations, unsigned int optimizeIterations, float register_start_resolution,
+
+void SlamGraph::refine(unsigned int refineIterations, unsigned int optimizeIterations, float register_start_resolution,
                   float register_stop_resolution)
 {
   if (optimizer_->vertices().size() >= 3)
@@ -618,7 +587,7 @@ void SLAM::refine(unsigned int refineIterations, unsigned int optimizeIterations
       ROS_DEBUG_STREAM_NAMED("slam", "refining " << i << " / " << refineIterations);
 
       // reestimate all edges in the graph from the current pose estimates in the graph
-      std::vector<g2o::EdgeSE3*> removeEdges;
+      std::vector<g2o::EdgeSE3*> remove_edges;
       for (EdgeSet::iterator it = optimizer_->edges().begin(); it != optimizer_->edges().end(); ++it)
       {
         g2o::EdgeSE3* edge = dynamic_cast<g2o::EdgeSE3*>(*it);
@@ -627,12 +596,12 @@ void SLAM::refine(unsigned int refineIterations, unsigned int optimizeIterations
 
         if (!retVal)
         {
-          removeEdges.push_back(edge);
+          remove_edges.push_back(edge);
         }
       }
 
-      for (unsigned int j = 0; j < removeEdges.size(); j++)
-        optimizer_->removeEdge(removeEdges[j]);
+      for (unsigned int j = 0; j < remove_edges.size(); j++)
+        optimizer_->removeEdge(remove_edges[j]);
 
       // reoptimize for 10 iterations
       optimizer_->initializeOptimization();
@@ -651,7 +620,7 @@ void SLAM::refine(unsigned int refineIterations, unsigned int optimizeIterations
   }
 }
 
-void SLAM::dumpError()
+void SlamGraph::dumpError()
 {
   // dump error of all edges in the slam graph
   std::ofstream outfile("slam_graph_error.dat");
@@ -662,4 +631,5 @@ void SLAM::dumpError()
 
     outfile << edge->chi2() << "\n";
   }
+}
 }

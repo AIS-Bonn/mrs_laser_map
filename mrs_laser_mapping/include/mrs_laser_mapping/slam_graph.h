@@ -32,11 +32,11 @@
  *  ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  *  POSSIBILITY OF SUCH DAMAGE.
  *
- *  Author: Jörg Stückler, David Droeschel (droeschel@ais.uni-bonn.de)
+ *  Author: David Droeschel (droeschel@ais.uni-bonn.de), Jörg Stückler
  */
 
-#ifndef SLAM_H_
-#define SLAM_H_
+#ifndef SLAM_GRAPH_H_
+#define SLAM_GRAPH_H_
 
 #include <mrs_laser_maps/multiresolution_surfel_registration.h>
 
@@ -59,57 +59,66 @@ typedef g2o::LinearSolverCholmod<SlamBlockSolver::PoseMatrixType> SlamLinearChol
 typedef std::tr1::unordered_map<int, g2o::HyperGraph::Vertex*> VertexIDMap;
 typedef std::set<g2o::HyperGraph::Edge*> EdgeSet;
 
-#include <mrs_laser_maps/map_multiresolution.h>
+#include <mrs_laser_maps/surfel_map_interface.h>
 
-namespace mrsmap
+namespace mrs_laser_mapping
 {
-//typedef PointXYZRGBScanLabel MapPointType;
-//typedef mrs_laser_maps::MultiResolutionalMap<PointXYZRGBScanLabel> ;
-// typedef mrs_laser_maps::MultiResolutionalMapGraph<PointXYZRGBScanLabel>	MultiResolutionSurfelMap;
 
-class KeyFrame
+class GraphNode
 {
 public:
-  KeyFrame()
+
+  typedef boost::shared_ptr<mrs_laser_maps::SurfelMapInterface> MapPtr;
+
+  typedef boost::shared_ptr< GraphNode > Ptr;
+  typedef boost::shared_ptr< GraphNode const> ConstPtr;
+  
+  GraphNode()
   {
-    sumLogLikelihood_ = 0.0;
-    numEdges_ = 0.0;
+    sum_log_likelihood_ = 0.0;
+    num_edges_ = 0.0;
   }
-  ~KeyFrame()
+  ~GraphNode()
   {
   }
 
-  boost::shared_ptr<mrs_laser_maps::MapType> map_;
-  unsigned int nodeId_;
+  MapPtr map_;
+  unsigned int node_id_;
 
-  pcl::PointCloud<mrs_laser_maps::MapPointType>::ConstPtr cloud_;
-
-  double sumLogLikelihood_;
-  double numEdges_;
+  double sum_log_likelihood_;
+  double num_edges_;
 
 private:
 };
 
-class SLAM
+class SlamGraph
 {
 public:
-  SLAM();
-  ~SLAM();
+  typedef boost::shared_ptr<SlamGraph> Ptr;
 
-  unsigned int addKeyFrame(unsigned int v_prev_id, boost::shared_ptr<KeyFrame>& keyFrame,
+  typedef boost::shared_ptr<mrs_laser_maps::SurfelMapInterface> MapPtr;
+
+  typedef GraphNode::Ptr GraphNodePtr;
+  typedef GraphNode::ConstPtr GraphNodeConstPtr;
+  
+  SlamGraph();
+  ~SlamGraph();
+
+  void setRegistrationParameters(const mrs_laser_maps::RegistrationParameters& params);
+  
+  unsigned int addKeyFrame(unsigned int v_prev_id, GraphNodePtr& keyFrame,
                            const Eigen::Matrix4d& transform);
 
   bool addEdge(unsigned int v1_id, unsigned int v2_id);
-  bool addEdge(unsigned int v1_id, unsigned int v2_id, const Eigen::Matrix4d& transformGuess);
+  bool addEdge(unsigned int v1_id, unsigned int v2_id, const Eigen::Matrix4d& transform_guess);
   bool addEdge(unsigned int v1_id, unsigned int v2_id, const Eigen::Matrix4d& transform,
                const Eigen::Matrix<double, 6, 6>& covariance);
 
   bool poseIsClose(const Eigen::Matrix4d& transform);
   bool poseIsFar(const Eigen::Matrix4d& transform);
 
-  bool update(boost::shared_ptr<mrs_laser_maps::MapType> view, pcl::PointCloud<mrs_laser_maps::MapPointType>::Ptr cloud,
-              bool localizeOnly = false);
-  bool setPose(const Eigen::Matrix4d& poseUpdate);
+  bool update(MapPtr view);
+  bool setPose(const Eigen::Matrix4d& pose_update);
 
   void connectClosePoses(bool random = false);
 
@@ -121,34 +130,26 @@ public:
 
   g2o::SparseOptimizer* optimizer_;
 
-  std::vector<boost::shared_ptr<KeyFrame>> keyFrames_;
-  std::map<unsigned int, boost::shared_ptr<KeyFrame>> keyFrameNodeMap_;
-  unsigned int referenceKeyFrameId_;
+  std::vector< GraphNodePtr > graph_nodes_;
+  std::map< unsigned int, GraphNodePtr > graph_nodes_map_;
+  
+  unsigned int reference_node_id_;
 
-  int maxIterations_;
+  double pose_is_close_dist_;
+  double pose_is_close_angle_;
 
-  double priorProb_;
-  double softAssocC1_;
-  int softAssocC2_;
-  double sigmaSizeFactor_;
+  double pose_is_far_dist_;
 
-  bool associateOnce_;
-
-  double poseIsCloseDist_;
-  double poseIsCloseAngle_;
-
-  double poseIsFarDist_;
-
-  bool addKeyFrameByDistance_;
-  bool addKeyFrame_;
-  bool firstFrame_;
+  bool add_nodes_by_distance_;
+  bool add_node_manual_;
+  bool first_frame_;
 
   // wrt reference key frame pose
-  Eigen::Matrix4d lastTransform_,
-      lastFrameTransform_;  // the latter is the pose used to build the lastFrameMap (in the map reference frame!)
+  Eigen::Matrix4d last_transform_;
 
-  boost::shared_ptr<mrs_laser_maps::MapType> lastFrameMap_;
 
+  mrs_laser_maps::MultiResolutionSurfelRegistration surfel_registration_;
+  
 public:
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
 

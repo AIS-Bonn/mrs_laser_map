@@ -58,7 +58,7 @@ generate_messages(
 catkin_package(
    INCLUDE_DIRS include
 )
-                                                                                                                                                                                                    #                                                                                                 
+
 include_directories(
   include
   ${catkin_INCLUDE_DIRS}
@@ -66,7 +66,9 @@ include_directories(
 )
 
 add_definitions(${PCL_DEFINITIONS})
-                                                                                                    
+
+#add_definitions(-DDEBUG_CELL_HITS)
+                                                                                                
 # boost required
 find_package(Boost REQUIRED COMPONENTS program_options thread system signals regex filesystem) 
 include_directories(${Boost_INCLUDE_DIRS}) 
@@ -95,12 +97,12 @@ set(EXECUTABLE_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/bin)
 set(LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/lib)
         
 SET ( SRCS
-	src/trajectory_publisher.cpp 
-	src/map_publisher.cpp 
-)               
+  src/map_publisher.cpp
+)
 
 SET ( SLAM_SRCS
-	src/mrsmap/slam.cpp 
+  src/slam_graph.cpp 
+  src/map_publisher.cpp
 )         
 
 SET (SLAM_LIBS
@@ -110,7 +112,7 @@ SET (SLAM_LIBS
         ${G2O_SOLVER_CSPARSE_EXTENSION} 
         ${G2O_TYPES_SLAM3D} 
 )
- 
+
 add_library(scan_assembler_nodelet src/nodes/scan_assembler_nodelet.cpp)
 target_link_libraries(scan_assembler_nodelet ${catkin_LIBRARIES})
 add_dependencies(scan_assembler_nodelet
