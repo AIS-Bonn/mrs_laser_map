@@ -69,47 +69,40 @@ public:
   virtual ~ScanAssemblerNodelet();
   virtual void onInit();
 
-	//! Save new scan lines to scan_line_buffer_
-	/*!
+  //! Save new scan lines to scan_line_buffer_
+  /*!
     \param msg a laser scan.
   */
-	void receivedLaserScan(const sensor_msgs::LaserScanConstPtr& msg);
+  void receivedLaserScan(const sensor_msgs::LaserScanConstPtr& msg);
 
 protected:
-	//! Accumulate scan lines to generate 360 degrees point clouds
-	/*!
+  //! Accumulate scan lines to generate 360 degrees point clouds
+  /*!
     Transforms scan lines from the scan_line_buffer_ to point clouds in the frame_id.
     Accumulates those point clouds until the laser scanner made a 360 degrees rotation and then publishes this point
     cloud.
   */
-	void processScans();
+  void processScans();
 
-	//! Check for a point cloud if it includes a full rotation of the scanner
-	/*!
-    \param scan_cloud the point cloud that should be checked if it is complete.
-    \return true if a scan is complete
-  */
-  bool isScanComplete(pcl::PointCloud<PointT>::Ptr scan_cloud);
-
-	//! Check if a scan is complete
-	/*!
+  //! Check if a scan is complete
+  /*!
     \param laser_angle the current angle of the scanner.
     \return true if laser_angle and last_laser_yaw_angle_ belong to different rotations
   */
   bool isScanComplete(float laser_angle);
 
 private:
-	// a fixed frame (something like the world frame), transforms between this frame and the base_link are important
+  // a fixed frame (something like the world frame), transforms between this frame and the base_link are important
   std::string frame_id_;
 
-	ros::Duration wait_duration_;
+  ros::Duration wait_duration_;
 
-	mrs_laser_maps::synchronized_circular_buffer<sensor_msgs::LaserScan> scan_line_buffer_;
+  mrs_laser_maps::synchronized_circular_buffer<sensor_msgs::LaserScan> scan_line_buffer_;
 
   bool is_running_;
   bool is_first_scan_line_;
   bool is_first_scan_;
-	
+
   boost::thread process_scan_thread_;
 
   ros::Publisher scan_publisher_;
@@ -130,6 +123,7 @@ private:
   
   bool half_rotation_;
   bool add_invalid_points_;
+  bool scan_line_number_by_stamp_;
 };
 }
 

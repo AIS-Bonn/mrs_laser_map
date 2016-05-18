@@ -55,6 +55,7 @@ ScanAssemblerNodelet::ScanAssemblerNodelet()
 
   , half_rotation_(false)
   , add_invalid_points_(false)
+  , scan_line_number_by_stamp_(false)
 {
   NODELET_INFO("Initializing scan assembler nodelet.. ");
 }
@@ -72,10 +73,11 @@ void ScanAssemblerNodelet::onInit()
 
   ros::NodeHandle& ph = getMTPrivateNodeHandle();
 
-  ph.getParam("frame_id", frame_id_);
-  ph.getParam("add_invalid_points", add_invalid_points_);
-  ph.getParam("half_rotation", half_rotation_);
-
+  ph.param<std::string>("frame_id", frame_id_, "/base_link");
+  ph.param<bool>("add_invalid_points", add_invalid_points_, false);
+  ph.param<bool>("half_rotation", half_rotation_, true);;
+  ph.param<bool>("scan_line_number_by_stamp", scan_line_number_by_stamp_, false);
+  
   double transform_wait_duration;
   ph.param<double>("transform_wait_duration", transform_wait_duration, 0.1);
   wait_duration_ = ros::Duration(transform_wait_duration);
@@ -119,6 +121,13 @@ void ScanAssemblerNodelet::processScans()
     if (is_first_scan_line_ && is_first_scan_)
     {
       scan_header_frame_id_ = scan.header.frame_id;
+    }
+    
+    // save stamp of first scan line of a scan
+    if (is_first_scan_line_)
+    {
+      first_stamp_ = scan.header.stamp;
+      is_first_scan_line_ = false;
     }
     
     sensor_msgs::PointCloud2 cloud;
@@ -172,6 +181,12 @@ void ScanAssemblerNodelet::processScans()
     std::vector<int> indices;
     pcl::removeNaNFromPointCloud(*cloud_transformed, *cloud_transformed, indices);
 
+    // calculate the scan line number from the scan's timestamp (e.g. when having two lasers)
+    if (scan_line_number_by_stamp_)
+    {
+      scan_line_number = static_cast<unsigned int>(ros::Duration(scan.header.stamp - first_stamp_).toNSec()*1e-6);
+    }
+    
     // add meta information
     for (size_t i = 0; i < cloud_transformed->size(); ++i)
     {
@@ -182,6 +197,7 @@ void ScanAssemblerNodelet::processScans()
 
       p.scanlineNr = scan_line_number;
       p.pointNr = point_number++;
+      
       cloud_for_assembler_->push_back(p);
     }
     scan_line_number++;
@@ -202,13 +218,6 @@ void ScanAssemblerNodelet::processScans()
     {
       NODELET_ERROR_THROTTLE(10.0, "Scan Assembler: No transform found");
       NODELET_ERROR_THROTTLE(10.0, "message: '%s'", exc.what());
-    }
-
-    // save stamp of first scan line of a scan
-    if (is_first_scan_line_)
-    {
-      first_stamp_ = scan.header.stamp;
-      is_first_scan_line_ = false;
     }
 
     double laser_yaw = tf::getYaw(laser_rotation_transform.getRotation()); //add M_PI_2 to have "black spots" on sides
@@ -245,19 +254,8 @@ void ScanAssemblerNodelet::processScans()
   }
 }
 
-bool ScanAssemblerNodelet::isScanComplete(pcl::PointCloud<PointT>::Ptr scan_cloud)
-{
-  if (scan_cloud->size() < 2)
-    return false;
-
-  PointT first_point = scan_cloud->points[0];
-  PointT last_point = scan_cloud->points[scan_cloud->size() - 1];
-
-  return isScanComplete(atan2(last_point.x - first_point.x, last_point.y - first_point.y));
-}
-
 bool ScanAssemblerNodelet::isScanComplete(float laser_angle)
-{
+{ 
   return (last_laser_yaw_angle_ < 0 && laser_angle > 0) || (half_rotation_ && (last_laser_yaw_angle_ > 0 && laser_angle < 0));
 }
 }
