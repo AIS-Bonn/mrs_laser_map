@@ -43,58 +43,49 @@
 
 namespace mrs_laser_mapping
 {
-template <typename PointT>
-void MapPublisher::publishOccupiedCells(const boost::shared_ptr<mrs_laser_maps::MultiResolutionalMap<PointT>>& map)
+template <typename PointType, typename MapType>
+void MapPublisher::publishOccupiedCells(const boost::shared_ptr<MapType>& map)
 {
-  if (m_markerPublisher.getNumSubscribers() == 0)
+  if (pub_marker_.getNumSubscribers() == 0)
     return;
 
-  int cubenr = 0;
-  int markerId = 0;
-  std::vector<float> cellSizes;
-  typename mrs_laser_maps::MultiResolutionalMap<PointT>::AlignedCellVectorVector occupiedCells;
-  std::vector<std::vector<pcl::PointXYZ>> occupiedCellsCenters;
+  int marker_id = 0;
+  std::vector<float> cell_sizes;
+  typename MapType::AlignedCellVectorVector occupied_cells;
+  std::vector<std::vector<pcl::PointXYZ>> occupied_cell_centers;
 
   int levels = map->getLevels();
 
-  /*
-  * log odds occupancy to [0,1]
-  */
-  // float occupancyScale = fabs(map->getClampingThreshMin()) + fabs(map->getClampingThreshMax());
-  // float occupancyOffset = fabs(map->getClampingThreshMin());
-
   for (int l = 0; l < levels; l++)
   {
-    cellSizes.push_back(map->getCellSize(l));
+    cell_sizes.push_back(map->getCellSize(l));
 
-    typename mrs_laser_maps::MultiResolutionalMap<PointT>::AlignedCellVector occupiedCellsTemp;
+    typename MapType::AlignedCellVector occupied_cells_level;
 
-    std::vector<pcl::PointXYZ> occupiedCellsCentersTemp;
-    map->getOccupiedCells(occupiedCellsTemp, l);
-    map->getOccupiedCells(occupiedCellsCentersTemp, l);
+    std::vector<pcl::PointXYZ> occupied_cell_centers_level;
+    map->getOccupiedCells(occupied_cells_level, l);
+    map->getOccupiedCells(occupied_cell_centers_level, l);
 
-    occupiedCells.push_back(occupiedCellsTemp);
-    occupiedCellsCenters.push_back(occupiedCellsCentersTemp);
+    occupied_cells.push_back(occupied_cells_level);
+    occupied_cell_centers.push_back(occupied_cell_centers_level);
   }
 
-  for (int l = cellSizes.size() - 1; l >= 0; l--)
+  for (int l = cell_sizes.size() - 1; l >= 0; l--)
   {
-    float cellSize = cellSizes[l];
-
-    std::string cubeName = boost::lexical_cast<std::string>(cubenr++);  // std::to_string(i);
+    float cell_size = cell_sizes[l];
 
     Eigen::Quaternionf q;
     visualization_msgs::Marker marker;
     marker.header.frame_id = map->getFrameId();
     marker.header.stamp = map->getLastUpdateTimestamp();
     marker.ns = "marker_test";
-    marker.id = markerId++;
+    marker.id = marker_id++;
     marker.lifetime = ros::Duration(0);
     marker.type = visualization_msgs::Marker::CUBE_LIST;
     marker.action = visualization_msgs::Marker::ADD;
-    marker.scale.x = cellSize;
-    marker.scale.y = cellSize;
-    marker.scale.z = cellSize;
+    marker.scale.x = cell_size;
+    marker.scale.y = cell_size;
+    marker.scale.z = cell_size;
     marker.color.r = 1.0;
     marker.color.g = 0.0;
     marker.color.b = 0.0;
@@ -103,82 +94,68 @@ void MapPublisher::publishOccupiedCells(const boost::shared_ptr<mrs_laser_maps::
     marker.pose.orientation.y = 0.f;
     marker.pose.orientation.z = 0.f;
     marker.pose.orientation.w = 1.f;
-    marker.points.resize(occupiedCells[l].size());
-    marker.colors.resize(occupiedCells[l].size());
+    marker.points.resize(occupied_cells[l].size());
+    marker.colors.resize(occupied_cells[l].size());
 
-    for (size_t i = 0; i < occupiedCells[l].size(); i++)
+    for (size_t i = 0; i < occupied_cells[l].size(); i++)
     {
-      marker.points[i].x = occupiedCellsCenters[l][i].x;  // - cellSize/2.f;
-      marker.points[i].y = occupiedCellsCenters[l][i].y;  // - cellSize/2.f;
-      marker.points[i].z = occupiedCellsCenters[l][i].z;  // - cellSize/2.f;
+      marker.points[i].x = occupied_cell_centers[l][i].x;  // - cellSize/2.f;
+      marker.points[i].y = occupied_cell_centers[l][i].y;  // - cellSize/2.f;
+      marker.points[i].z = occupied_cell_centers[l][i].z;  // - cellSize/2.f;
 
-      double occupancyNorm =
-          static_cast<double>(l) / static_cast<double>(cellSizes.size());  //(occupiedCells[l][i].getOccupancy() +
-                                                                           //occupancyOffset) / occupancyScale;
+      double occupancy_normalized =
+          static_cast<double>(l) / static_cast<double>(cell_sizes.size());  
 
-      marker.colors[i].r = std::min(1.0, occupancyNorm);  // 0.0;
+      marker.colors[i].r = std::min(1.0, occupancy_normalized);  // 0.0;
       marker.colors[i].g = 1.f;
-      marker.colors[i].b = 1.f - std::min(1.0, occupancyNorm);
-
-      // 			marker.colors[ i ].r = std::min( 1.0, occupancyNorm );//0.0;
-      // 			marker.colors[ i ].g = 1.f;
-      // 			marker.colors[ i ].b = 1.f - std::min( 1.0, occupancyNorm );
-
-      marker.colors[i].a = 0.5f;  // 0.075f; //std::max( std::min(m_map[ iz ][ iy ][ ix ], 1.f), 0.f);
-      //			if (cut ( marker.points[ i ].x, marker.points[ i ].y, marker.points[ i ].z ) )
-      //				marker.colors[ i ].a = 0.f;
+      marker.colors[i].b = 1.f - std::min(1.0, occupancy_normalized);
+      marker.colors[i].a = 0.5f;  
     }
-    m_markerPublisher.publish(marker);
+    pub_marker_.publish(marker);
   }
 }
 
-template <typename PointT>
-void MapPublisher::publishCellsWithOccupancy(const boost::shared_ptr<mrs_laser_maps::MultiResolutionalMap<PointT>>& map)
+template <typename PointType, typename MapType>
+void MapPublisher::publishCellsWithOccupancy(const boost::shared_ptr<MapType>& map)
 {
-  if (m_markerPublisher.getNumSubscribers() == 0)
+  if (pub_marker_.getNumSubscribers() == 0)
     return;
 
-  int cubenr = 0;
-  int markerId = 0;
-  std::vector<float> cellSizes;
-  std::vector<std::vector<Eigen::Vector3f>> occupiedCellOffsets;
-  typename mrs_laser_maps::MultiResolutionalMap<PointT>::AlignedCellVectorVector occupiedGridCells;
-
-  pcl::PointCloud<pcl::PointXYZ>::Ptr cellPointsCloud(new pcl::PointCloud<pcl::PointXYZ>);
-
-  pcl::PointCloud<pcl::PointXYZ>::Ptr testCloud(new pcl::PointCloud<pcl::PointXYZ>);
-  map->getCellPoints(testCloud);
-
+  int marker_id = 0;
+  std::vector<float> cell_sizes;
+  std::vector<std::vector<Eigen::Vector3f>> occupied_cell_offsets;
+  typename MapType::AlignedCellVectorVector occupied_grid_cells;
+  
   int levels = map->getLevels();
 
   for (int l = 0; l < levels; l++)
   {
-    cellSizes.push_back(map->getCellSize(l));
+    cell_sizes.push_back(map->getCellSize(l));
 
-    std::vector<Eigen::Vector3f> occupiedCellsTemp;
-    typename mrs_laser_maps::MultiResolutionalMap<PointT>::AlignedCellVector occupiedGridCellsTemp;
+    std::vector<Eigen::Vector3f> occupied_cells_level;
+    typename MapType::AlignedCellVector occupied_grid_cells_level;
 
-    map->getOccupiedCellsWithOffset(occupiedGridCellsTemp, occupiedCellsTemp, l);
-    occupiedCellOffsets.push_back(occupiedCellsTemp);
-    occupiedGridCells.push_back(occupiedGridCellsTemp);
+    map->getOccupiedCellsWithOffset(occupied_grid_cells_level, occupied_cells_level, l);
+    occupied_cell_offsets.push_back(occupied_cells_level);
+    occupied_grid_cells.push_back(occupied_grid_cells_level);
   }
 
-  for (int l = cellSizes.size() - 1; l >= 0; l--)
+  for (int l = cell_sizes.size() - 1; l >= 0; l--)
   {
-    float cellSize = cellSizes[l];
+    float cell_size = cell_sizes[l];
 
     Eigen::Quaternionf q;
     visualization_msgs::Marker marker;
     marker.header.frame_id = map->getFrameId();
     marker.header.stamp = map->getLastUpdateTimestamp();
     marker.ns = "marker_test_occupancy_information";
-    marker.id = markerId++;
+    marker.id = marker_id++;
     marker.lifetime = ros::Duration(0);
     marker.type = visualization_msgs::Marker::CUBE_LIST;
     marker.action = visualization_msgs::Marker::ADD;
-    marker.scale.x = cellSize;
-    marker.scale.y = cellSize;
-    marker.scale.z = cellSize;
+    marker.scale.x = cell_size;
+    marker.scale.y = cell_size;
+    marker.scale.z = cell_size;
     marker.color.r = 1.0;
     marker.color.g = 0.0;
     marker.color.b = 0.0;
@@ -187,44 +164,41 @@ void MapPublisher::publishCellsWithOccupancy(const boost::shared_ptr<mrs_laser_m
     marker.pose.orientation.y = 0.f;
     marker.pose.orientation.z = 0.f;
     marker.pose.orientation.w = 1.f;
-    marker.points.resize(occupiedCellOffsets[l].size());
-    marker.colors.resize(occupiedCellOffsets[l].size());
+    marker.points.resize(occupied_cell_offsets[l].size());
+    marker.colors.resize(occupied_cell_offsets[l].size());
 
-    for (size_t i = 0; i < occupiedCellOffsets[l].size(); i++)
+    for (size_t i = 0; i < occupied_cell_offsets[l].size(); i++)
     {
-      // if ( occupiedGridCells[l][i].m_debugState == mrs_laser_maps::GridCellWithStatistics::FREE )
-      //	continue;
-
       geometry_msgs::Point p;
-      p.x = occupiedCellOffsets[l][i](0);  // - cellSize/2.f;
-      p.y = occupiedCellOffsets[l][i](1);  // - cellSize/2.f;
-      p.z = occupiedCellOffsets[l][i](2);  // - cellSize/2.f;
+      p.x = occupied_cell_offsets[l][i](0);  // - cellSize/2.f;
+      p.y = occupied_cell_offsets[l][i](1);  // - cellSize/2.f;
+      p.z = occupied_cell_offsets[l][i](2);  // - cellSize/2.f;
 
       std_msgs::ColorRGBA c;
 
-      switch (occupiedGridCells[l][i].m_debugState)
+      switch (occupied_grid_cells[l][i].m_debugState)
       {
-		case mrs_laser_maps::MultiResolutionalMap<PointT>::GridCellType::UNINITIALIZED:
+		case MapType::GridCellType::UNINITIALIZED:
           c.r = 0.7f;
           c.g = 0.7f;
           c.b = 0.7f;
           c.a = 0.1f;
           break;
-		case mrs_laser_maps::MultiResolutionalMap<PointT>::GridCellType::FREE:
+		case MapType::GridCellType::FREE:
           c.r = 0.f;
           c.g = 1.f;
           c.b = 1.f;
           c.a = 0.f;
           break;
 
-		case mrs_laser_maps::MultiResolutionalMap<PointT>::GridCellType::OCCUPIED:
+		case MapType::GridCellType::OCCUPIED:
           c.r = 0.f;
           c.g = 1.f;
           c.b = 1.f;
           c.a = 1.f;
           break;
 
-		case mrs_laser_maps::MultiResolutionalMap<PointT>::GridCellType::UNKNOWN:
+		case MapType::GridCellType::UNKNOWN:
           c.r = 0.7f;
           c.g = 0.7f;
           c.b = 0.7f;
@@ -242,88 +216,88 @@ void MapPublisher::publishCellsWithOccupancy(const boost::shared_ptr<mrs_laser_m
       marker.points.push_back(p);
       marker.colors.push_back(c);
     }
-    m_markerPublisher.publish(marker);
+    pub_marker_.publish(marker);
   }
 }
 
-template <typename PointT>
-void MapPublisher::publishMap(const boost::shared_ptr<mrs_laser_maps::MultiResolutionalMap<PointT>>& map)
+template <typename PointType, typename MapType>
+void MapPublisher::publishMap(const boost::shared_ptr<MapType>& map)
 {
-  if (m_mapMsgPublisher.getNumSubscribers() == 0)
+  if (pub_map_msg_.getNumSubscribers() == 0)
     return;
   pcl::StopWatch timer;
   timer.reset();
 
-  mrs_laser_mapping::MultiResolutionMapPtr mapMsg(new mrs_laser_mapping::MultiResolutionMap);
-  mapMsg->header.stamp = map->getLastUpdateTimestamp();
-  mapMsg->header.frame_id = map->getFrameId();
-  mapMsg->levels = map->getLevels();
-  mapMsg->size_in_meters = map->getSizeInMeters();
-  mapMsg->resolution = map->getResolution();
-  mapMsg->cell_capacity = map->getCellCapacity();
+  mrs_laser_mapping::MultiResolutionMapPtr map_msg(new mrs_laser_mapping::MultiResolutionMap);
+  map_msg->header.stamp = map->getLastUpdateTimestamp();
+  map_msg->header.frame_id = map->getFrameId();
+  map_msg->levels = map->getLevels();
+  map_msg->size_in_meters = map->getSizeInMeters();
+  map_msg->resolution = map->getResolution();
+  map_msg->cell_capacity = map->getCellCapacity();
 
-  unsigned int nrPoints = 0;
+  unsigned int nr_points = 0;
   for (unsigned int i = 0; i < map->getLevels(); i++)
   {
-    typename pcl::PointCloud<PointT>::Ptr points(new pcl::PointCloud<PointT>());
+    typename pcl::PointCloud<PointType>::Ptr points(new pcl::PointCloud<PointType>());
     map->getCellPoints(points, i);
 
-    sensor_msgs::PointCloud2 rosCloud;
+    sensor_msgs::PointCloud2 ros_cloud;
 
-    pcl::toROSMsg(*points, rosCloud);
+    pcl::toROSMsg(*points, ros_cloud);
 
-    mapMsg->cloud.push_back(rosCloud);
-    nrPoints += points->size();
+    map_msg->cloud.push_back(ros_cloud);
+    nr_points += points->size();
   }
 
   /*
    * get all free cells
    */
-  std::vector<float> cellSizes;
-  std::vector<std::vector<Eigen::Vector3f>> occupiedCellOffsets;
-  typename mrs_laser_maps::MultiResolutionalMap<PointT>::CellPointerVectorVector occupiedGridCells;
+  std::vector<float> cell_sizes;
+  std::vector<std::vector<Eigen::Vector3f>> occupied_cell_offsets;
+  typename MapType::CellPointerVectorVector occupied_grid_cells;
   int levels = map->getLevels();
 
   for (int l = 0; l < levels; l++)
   {
-    cellSizes.push_back(map->getCellSize(l));
+    cell_sizes.push_back(map->getCellSize(l));
 
-    std::vector<Eigen::Vector3f> occupiedCellsTemp;
-    typename mrs_laser_maps::MultiResolutionalMap<PointT>::CellPointerVector occupiedGridCellsTemp;
+    std::vector<Eigen::Vector3f> occupied_cells_level;
+    typename MapType::CellPointerVector occupied_grid_cells_level;
 
-    map->getCellsWithOffset(occupiedGridCellsTemp, occupiedCellsTemp, l, -99999.f);  // TODO: this sucks...
+    map->getCellsWithOffset(occupied_grid_cells_level, occupied_cells_level, l, -99999.f);  // TODO: this sucks...
 
-    occupiedCellOffsets.push_back(occupiedCellsTemp);
-    occupiedGridCells.push_back(occupiedGridCellsTemp);
+    occupied_cell_offsets.push_back(occupied_cells_level);
+    occupied_grid_cells.push_back(occupied_grid_cells_level);
   }
 
-  for (int l = cellSizes.size() - 1; l >= 0; l--)
+  for (int l = cell_sizes.size() - 1; l >= 0; l--)
   {
-    for (size_t i = 0; i < occupiedCellOffsets[l].size(); i++)
+    for (size_t i = 0; i < occupied_cell_offsets[l].size(); i++)
     {
-      if ((*occupiedGridCells[l][i]).getOccupancy() <= 0.f)
+      if ((*occupied_grid_cells[l][i]).getOccupancy() <= 0.f)
       {  // thos
          // 				if ( occupiedGridCells[l][i]->m_debugState == mrs_laser_maps::GridCellWithStatistics::FREE ) {
         geometry_msgs::Point p;
-        p.x = occupiedCellOffsets[l][i](0);
-        p.y = occupiedCellOffsets[l][i](1);
-        p.z = occupiedCellOffsets[l][i](2);
+        p.x = occupied_cell_offsets[l][i](0);
+        p.y = occupied_cell_offsets[l][i](1);
+        p.z = occupied_cell_offsets[l][i](2);
 
-        mapMsg->free_cell_centers.push_back(p);
+        map_msg->free_cell_centers.push_back(p);
       }
     }
   }
 
-  m_mapMsgPublisher.publish(mapMsg);
-  ROS_DEBUG_STREAM_NAMED("map_publisher","published map message took: " << timer.getTime() << " ms with " << nrPoints
-                                                 << " points. from timestamp " << mapMsg->header.stamp << " at time "
+  pub_map_msg_.publish(map_msg);
+  ROS_DEBUG_STREAM_NAMED("map_publisher","published map message took: " << timer.getTime() << " ms with " << nr_points
+                                                 << " points. from timestamp " << map_msg->header.stamp << " at time "
                                                  << ros::Time::now());
 }
 
-template <typename PointT>
-void MapPublisher::publishMapLevelColor(const boost::shared_ptr<mrs_laser_maps::MultiResolutionalMap<PointT>>& map)
+template <typename PointType, typename MapType>
+void MapPublisher::publishMapLevelColor(const boost::shared_ptr<MapType>& map)
 {
-  if (m_levelColorCellPublisher.getNumSubscribers() == 0)
+  if (pub_cloud_level_color_.getNumSubscribers() == 0)
     return;
 
   typename pcl::PointCloud<pcl::PointXYZRGB>::Ptr cellPointsCloud(new pcl::PointCloud<pcl::PointXYZRGB>());
@@ -331,7 +305,7 @@ void MapPublisher::publishMapLevelColor(const boost::shared_ptr<mrs_laser_maps::
   {
     double levelNumberNormalized = (static_cast<double>(l + 1) / map->getLevels());
 
-    typename pcl::PointCloud<PointT>::Ptr levelPointsCloud(new pcl::PointCloud<PointT>());
+    typename pcl::PointCloud<PointType>::Ptr levelPointsCloud(new pcl::PointCloud<PointType>());
     map->getCellPoints(levelPointsCloud, l);
 
     float r, g, b;
@@ -354,8 +328,44 @@ void MapPublisher::publishMapLevelColor(const boost::shared_ptr<mrs_laser_maps::
 
   cellPointsCloud->header.frame_id = map->getFrameId();
   cellPointsCloud->header.stamp = pcl_conversions::toPCL(map->getLastUpdateTimestamp());
-  m_levelColorCellPublisher.publish(cellPointsCloud);
+  pub_cloud_level_color_.publish(cellPointsCloud);
 }
+
+
+template <typename PointType, typename MapType>
+void MapPublisher::publishMapScanColor(const boost::shared_ptr<MapType>& map)
+{
+  if (pub_cloud_scan_color_.getNumSubscribers() == 0)
+    return;
+
+  pcl::PointCloud<PointXYZRGBScanLabel>::Ptr cloud_map(new pcl::PointCloud<PointXYZRGBScanLabel>());
+  pcl::StopWatch watch;
+  
+  map->getCellPoints(cloud_map);
+
+//   ROS_INFO_STREAM("get all cvellpoints took: " << watch.getTime());
+  pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_pub(new pcl::PointCloud<pcl::PointXYZRGB>());
+  pcl::copyPointCloud(*cloud_map, *cloud_pub);
+  
+  
+  for (size_t i = 0; i < cloud_map->size(); ++i)
+  {
+    double scan_number_normalized = fmod((static_cast<double>(cloud_map->points[i].scanNr) / 100.0), 1.0);
+    float r, g, b;
+    ColorMapJet::getRainbowColor(scan_number_normalized, r, g, b);
+  
+    cloud_pub->points[i].r = static_cast<int>(255.f * r);
+    cloud_pub->points[i].g = static_cast<int>(255.f * g);
+    cloud_pub->points[i].b = static_cast<int>(255.f * b);
+  }
+  
+  cloud_pub->header.frame_id = map->getFrameId();
+  cloud_pub->header.stamp = pcl_conversions::toPCL(map->getLastUpdateTimestamp());
+  pub_cloud_scan_color_.publish(cloud_pub);
+
+}
+
+
 }
 
 #endif

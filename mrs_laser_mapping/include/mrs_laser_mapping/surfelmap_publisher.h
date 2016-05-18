@@ -61,36 +61,23 @@ public:
 
   
 
-  template <typename PointT>
-  void publishSurfelMarkers(const boost::shared_ptr<mrs_laser_maps::MultiResolutionalMap<PointT>>& map);
+  template <typename PointType, typename MapType>
+  void publishSurfelMarkers(const boost::shared_ptr<MapType>& map);
 
-  template <typename PointT>
-  void publishPointCloud(const boost::shared_ptr<mrs_laser_maps::MultiResolutionalMap<PointT>>& map);
+  template <typename PointType, typename MapType>
+  void publishPointCloud(const boost::shared_ptr<MapType>& map);
 
-  template <typename PointT>
-  void publishDownsampledPointCloud(const boost::shared_ptr<mrs_laser_maps::MultiResolutionalMap<PointT>>& map, int mapSizeDownsampled,
+  template <typename PointType, typename MapType>
+  void publishDownsampledPointCloud(const boost::shared_ptr<MapType>& map, int mapSizeDownsampled,
                                     double resolutionDownsampled, int levelsDownsampled, int cellCapacityDownsampled);
 
   void publishScenePointCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud);
   void publishTransformedScenePointCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud);
 
-  template <typename PointT>
+  template <typename PointType, typename MapType>
   void publishCorrespondences(pcl::PointCloud<pcl::PointXYZRGB>::Ptr source,
                               pcl::PointCloud<pcl::PointXYZRGB>::Ptr target,
-                              const boost::shared_ptr<mrs_laser_maps::MultiResolutionalMap<PointT>>& map);
-
-  void cutOffTop(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud)
-  {
-    pcl::PointCloud<pcl::PointXYZ>::Ptr out = pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<pcl::PointXYZ>());
-    out->points.resize(cloud->points.size());
-    for (unsigned int i = 0; i < cloud->size(); i++)
-    {
-      if (cloud->points[i].z < 0.75f)
-        out->points.push_back(cloud->points[i]);
-    }
-
-    (*cloud).swap(*out);
-  }
+                              const boost::shared_ptr<MapType>& map);
 
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 

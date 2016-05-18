@@ -38,13 +38,14 @@
 
 namespace mrs_laser_mapping
 {
-MapPublisher* MapPublisher::m_instance = 0;
+MapPublisher* MapPublisher::instance_ = 0;
 
-MapPublisher::MapPublisher() : m_nodeHandle("~")
+MapPublisher::MapPublisher() : node_handle_("~")
 {
-  m_markerPublisher = m_nodeHandle.advertise<visualization_msgs::Marker>("occupied_cells_marker", 10);
-  m_mapMsgPublisher = m_nodeHandle.advertise<mrs_laser_mapping::MultiResolutionMap>("multires_map", 10);
-  m_levelColorCellPublisher = m_nodeHandle.advertise<sensor_msgs::PointCloud2>("pointcloud_level_colored", 10);
+  pub_marker_ = node_handle_.advertise<visualization_msgs::Marker>("occupied_cells_marker", 10);
+  pub_map_msg_ = node_handle_.advertise<mrs_laser_mapping::MultiResolutionMap>("multires_map", 10);
+  pub_cloud_level_color_ = node_handle_.advertise<sensor_msgs::PointCloud2>("pointcloud_level_colored", 10);
+  pub_cloud_scan_color_ = node_handle_.advertise<sensor_msgs::PointCloud2>("pointcloud_scan_colored", 10);
 }
 
 MapPublisher::~MapPublisher()
@@ -53,8 +54,9 @@ MapPublisher::~MapPublisher()
 
 MapPublisher* MapPublisher::getInstance()
 {
-  if (m_instance == 0)
-    m_instance = new MapPublisher();
-  return m_instance;
+  if (instance_ == 0)
+    instance_ = new MapPublisher();
+  return instance_;
 }
+  
 }

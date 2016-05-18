@@ -58,26 +58,29 @@ public:
 
   static MapPublisher* getInstance();
 
-  template <typename PointT>
-  void publishOccupiedCells(const boost::shared_ptr<mrs_laser_maps::MultiResolutionalMap<PointT>>& map);
+  template <typename PointType, typename MapType>
+  void publishOccupiedCells(const boost::shared_ptr<MapType>& map);
 
-  template <typename PointT>
-  void publishCellsWithOccupancy(const boost::shared_ptr<mrs_laser_maps::MultiResolutionalMap<PointT>>& map);
+  template <typename PointType, typename MapType>
+  void publishCellsWithOccupancy(const boost::shared_ptr<MapType>& map);
 
-  template <typename PointT>
-  void publishMap(const boost::shared_ptr<mrs_laser_maps::MultiResolutionalMap<PointT>>& map);
+  template <typename PointType, typename MapType>
+  void publishMap(const boost::shared_ptr<MapType>& map);
 
-  template <typename PointT>
-  void publishMapLevelColor(const boost::shared_ptr<mrs_laser_maps::MultiResolutionalMap<PointT>>& map);
+  template <typename PointType, typename MapType>
+  void publishMapLevelColor(const boost::shared_ptr<MapType>& map);
+  
+  template <typename PointType, typename MapType>
+  void publishMapScanColor(const boost::shared_ptr<MapType>& map);
 
 private:
-  static MapPublisher* m_instance;
+  static MapPublisher* instance_;
 
-  ros::NodeHandle m_nodeHandle;
-  ros::Publisher m_markerPublisher;
-  ros::Publisher m_entropyCellPublisher;
-  ros::Publisher m_mapMsgPublisher;
-  ros::Publisher m_levelColorCellPublisher;
+  ros::NodeHandle node_handle_;
+  ros::Publisher pub_marker_;
+  ros::Publisher pub_map_msg_;
+  ros::Publisher pub_cloud_level_color_;
+  ros::Publisher pub_cloud_scan_color_;
 };
 }
 

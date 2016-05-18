@@ -73,13 +73,13 @@ void SurfelMapPublisher::publishTransformedScenePointCloud(pcl::PointCloud<pcl::
   m_scenePointCloudTransformedPublisher.publish(cloud);
 }
 	
-template <typename PointT>
-void SurfelMapPublisher::publishPointCloud(const boost::shared_ptr<mrs_laser_maps::MultiResolutionalMap<PointT>>& map)
+template <typename PointType, typename MapType>
+void SurfelMapPublisher::publishPointCloud(const boost::shared_ptr<MapType>& map)
 {
   if (m_pointCloudPublisher.getNumSubscribers() == 0)
     return;
 
-  typename pcl::PointCloud<PointT>::Ptr cellPointsCloud(new pcl::PointCloud<PointT>());
+  typename pcl::PointCloud<PointType>::Ptr cellPointsCloud(new pcl::PointCloud<PointType>());
   map->lock();
   map->getCellPoints(cellPointsCloud);
   map->unlock();
@@ -89,8 +89,8 @@ void SurfelMapPublisher::publishPointCloud(const boost::shared_ptr<mrs_laser_map
   ROS_DEBUG_STREAM("publishing cell points: " << cellPointsCloud->size());
 }
 
-template <typename PointT>
-void SurfelMapPublisher::publishDownsampledPointCloud(const boost::shared_ptr<mrs_laser_maps::MultiResolutionalMap<PointT>>& map,
+template <typename PointType, typename MapType>
+void SurfelMapPublisher::publishDownsampledPointCloud(const boost::shared_ptr<MapType>& map,
                                                       int mapSizeDownsampled, double resolutionDownsampled,
                                                       int levelsDownsampled, int cellCapacityDownsampled)
 {
@@ -98,15 +98,15 @@ void SurfelMapPublisher::publishDownsampledPointCloud(const boost::shared_ptr<mr
     return;
 
   // publish downsampled map
-  typename pcl::PointCloud<PointT>::Ptr cellPointsCloud(new pcl::PointCloud<PointT>());
+  typename pcl::PointCloud<PointType>::Ptr cellPointsCloud(new pcl::PointCloud<PointType>());
   map->lock();
   map->getCellPointsDownsampled(cellPointsCloud, cellCapacityDownsampled);
   map->unlock();
   // TODO: move in map publisher to avoid duplicate pointcloud
-  mrs_laser_maps::MultiResolutionalMap<PointT> mapDownsampled(mapSizeDownsampled, resolutionDownsampled, levelsDownsampled,
+  MapType mapDownsampled(mapSizeDownsampled, resolutionDownsampled, levelsDownsampled,
                                               cellCapacityDownsampled, map->getFrameId());
   mapDownsampled.addCloud(cellPointsCloud);
-  typename pcl::PointCloud<PointT>::Ptr cellPointsCloudDownsampled(new pcl::PointCloud<PointT>());
+  typename pcl::PointCloud<PointType>::Ptr cellPointsCloudDownsampled(new pcl::PointCloud<PointType>());
   mapDownsampled.getCellPoints(cellPointsCloudDownsampled);
 
   cellPointsCloudDownsampled->header.frame_id = map->getFrameId();
@@ -119,10 +119,10 @@ void SurfelMapPublisher::publishScenePointCloud(pcl::PointCloud<pcl::PointXYZ>::
   m_scenePointCloudPublisher.publish(cloud);
 }
 
-template <typename PointT>
+template <typename PointType, typename MapType>
 void SurfelMapPublisher::publishCorrespondences(pcl::PointCloud<pcl::PointXYZRGB>::Ptr source,
                                                 pcl::PointCloud<pcl::PointXYZRGB>::Ptr target,
-                                                const boost::shared_ptr<mrs_laser_maps::MultiResolutionalMap<PointT>>& map)
+                                                const boost::shared_ptr<MapType>& map)
 {
   if (m_correspondencePublisher.getNumSubscribers() == 0)
     return;
@@ -176,15 +176,15 @@ void SurfelMapPublisher::publishCorrespondences(pcl::PointCloud<pcl::PointXYZRGB
   m_correspondencePublisher.publish(marker);
 }
 
-template <typename PointT>
-void SurfelMapPublisher::publishSurfelMarkers(const boost::shared_ptr<mrs_laser_maps::MultiResolutionalMap<PointT>>& map)
+template <typename PointType, typename MapType>
+void SurfelMapPublisher::publishSurfelMarkers(const boost::shared_ptr<MapType>& map)
 {
   if (m_markerPublisher.getNumSubscribers() == 0)
     return;
 
   unsigned int markerId = 0;
   std::vector<float> cellSizes;
-  typename mrs_laser_maps::MultiResolutionalMap<PointT>::AlignedCellVectorVector occupiedCells;
+  typename MapType::AlignedCellVectorVector occupiedCells;
   std::vector<std::vector<pcl::PointXYZ>> occupiedCellsCenters;
 
   int levels = map->getLevels();
@@ -207,7 +207,7 @@ void SurfelMapPublisher::publishSurfelMarkers(const boost::shared_ptr<mrs_laser_
   {
     cellSizes.push_back(map->getCellSize(l));
 
-    typename mrs_laser_maps::MultiResolutionalMap<PointT>::AlignedCellVector occupiedCellsTemp;
+    typename MapType::AlignedCellVector occupiedCellsTemp;
     std::vector<pcl::PointXYZ> occupiedCellsCentersTemp;
     map->getOccupiedCells(occupiedCellsTemp, l);
     map->getOccupiedCells(occupiedCellsCentersTemp, l);
