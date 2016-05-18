@@ -38,25 +38,49 @@
 #ifndef MULTIRESOLUTION_SURFEL_REGISTRATION_H_
 #define MULTIRESOLUTION_SURFEL_REGISTRATION_H_
 
-#include <mrs_laser_maps/map_multiresolution.h>
-#include <mrs_laser_maps/grid_cell_with_statistics.h>
-
-#include <pcl/common/time.h>
+#include <list>
 
 #include <tbb/tbb.h>
 
-#include <list>
+#include <pcl/common/time.h>
+
+#include <mrs_laser_maps/map_point_types.h>
+#include <mrs_laser_maps/surfel_map_interface.h>
 
 // takes in two map for which it estimates the rigid transformation with a coarse-to-fine strategy.
 namespace mrs_laser_maps
 {
- typedef mrs_laser_maps::MultiResolutionalMap<mrs_laser_maps::MapPointType> MapType;
- typedef MapType::GridCellType GridCellType;
+struct RegistrationParameters
+{
+  RegistrationParameters()
+  : associate_once_(true)
+  , prior_prob_(0.9)
+  , sigma_size_factor_(0.25)
+  , soft_assoc_c1_(1.0)
+  , soft_assoc_c2_(8.0)
+  , soft_assoc_c3_(1.0)
+  , max_iterations_(100)
+  {
+  }
 
+  bool associate_once_;
+    
+  double prior_prob_;
+
+  double sigma_size_factor_;
+
+  double soft_assoc_c1_, soft_assoc_c2_, soft_assoc_c3_;
+  
+  int max_iterations_;
+};
+  
 class MultiResolutionSurfelRegistration
 {
 public:
+  MultiResolutionSurfelRegistration(const RegistrationParameters& params);
+  
   MultiResolutionSurfelRegistration();
+  
   ~MultiResolutionSurfelRegistration()
   {
   }
@@ -67,7 +91,7 @@ public:
     SingleAssociation() : cell_scene_(NULL), cell_model_(NULL), match(0)
     {
     }
-    SingleAssociation(mrs_laser_maps::GridCellType* cell_scene, mrs_laser_maps::GridCellType* cell_model)
+    SingleAssociation(mrs_laser_maps::SurfelCellInterface* cell_scene, mrs_laser_maps::SurfelCellInterface* cell_model)
       : cell_scene_(cell_scene), cell_model_(cell_model), match(1)
     {
     }
@@ -75,8 +99,8 @@ public:
     {
     }
 
-    mrs_laser_maps::GridCellType* cell_scene_;
-    mrs_laser_maps::GridCellType* cell_model_;
+    mrs_laser_maps::SurfelCellInterface* cell_scene_;
+    mrs_laser_maps::SurfelCellInterface* cell_model_;
 
     double error;
     double weight;
@@ -109,7 +133,7 @@ public:
     {
     }
 
-    mrs_laser_maps::GridCellType* cell_scene_;
+    mrs_laser_maps::SurfelCellInterface* cell_scene_;
 
     unsigned int model_points_;
 
@@ -124,7 +148,7 @@ public:
   class CellInfo
   {
   public:
-    mrs_laser_maps::GridCellType* cell_;
+    mrs_laser_maps::SurfelCellInterface* cell_;
     Eigen::Vector3d offset_;
 
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
@@ -134,8 +158,8 @@ public:
 
   struct RegistrationFunctionParameters
   {
-    MapType* model;
-    MapType* scene;
+    mrs_laser_maps::SurfelMapInterface* model;
+    mrs_laser_maps::SurfelMapInterface* scene;
     MultiResolutionSurfelRegistration::CellInfoList scene_cells;
 
     unsigned int model_num_points_, scene_num_points_;
@@ -152,16 +176,18 @@ public:
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr correspondences_target_points_;
   };
 
-  void associateMapsBreadthFirstParallel(AssociationList& surfelAssociations, MapType* model, MapType* scene,
+  void setRegistrationParameters(const RegistrationParameters& params);
+
+  void associateMapsBreadthFirstParallel(AssociationList& surfelAssociations, mrs_laser_maps::SurfelMapInterface* model, mrs_laser_maps::SurfelMapInterface* scene,
                                          MultiResolutionSurfelRegistration::CellInfoList& sceneCells,
                                          Eigen::Matrix4d& transform, double sigma);
 
-  bool estimateTransformationLevenbergMarquardt(MapType* model, MapType* scene, Eigen::Matrix4d& transform,
+  bool estimateTransformationLevenbergMarquardt(mrs_laser_maps::SurfelMapInterface* model, mrs_laser_maps::SurfelMapInterface* scene, Eigen::Matrix4d& transform,
                                                 pcl::PointCloud<pcl::PointXYZRGB>::Ptr correspondencesSourcePoints,
                                                 pcl::PointCloud<pcl::PointXYZRGB>::Ptr correspondencesTargetPoints,
                                                 int maxIterations);
 
-  bool estimateTransformationLevenbergMarquardt(MapType* model, MapType* scene, Eigen::Matrix4d& transform,
+  bool estimateTransformationLevenbergMarquardt(mrs_laser_maps::SurfelMapInterface* model, mrs_laser_maps::SurfelMapInterface* scene, Eigen::Matrix4d& transform,
                                                 int maxIterations)
   {
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr correspondencesSourcePoints;
@@ -170,9 +196,25 @@ public:
                                                     correspondencesTargetPoints, maxIterations);
   }
 
-  bool estimatePoseCovariance(Eigen::Matrix<double, 6, 6>& poseCov, MapType* model, MapType* scene,
+  bool estimateTransformationLevenbergMarquardt(mrs_laser_maps::SurfelMapInterface* model, mrs_laser_maps::SurfelMapInterface* scene, Eigen::Matrix4d& transform,
+                                                pcl::PointCloud<pcl::PointXYZRGB>::Ptr correspondencesSourcePoints,
+                                                pcl::PointCloud<pcl::PointXYZRGB>::Ptr correspondencesTargetPoints)
+  {
+    return estimateTransformationLevenbergMarquardt(model, scene, transform, correspondencesSourcePoints,
+                                                    correspondencesTargetPoints, max_iterations_);
+  }
+  
+  bool estimateTransformationLevenbergMarquardt(mrs_laser_maps::SurfelMapInterface* model, mrs_laser_maps::SurfelMapInterface* scene, Eigen::Matrix4d& transform)
+  {
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr correspondencesSourcePoints;
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr correspondencesTargetPoints;
+    return estimateTransformationLevenbergMarquardt(model, scene, transform, correspondencesSourcePoints,
+                                                    correspondencesTargetPoints, max_iterations_);
+  }
+  
+  bool estimatePoseCovariance(Eigen::Matrix<double, 6, 6>& poseCov, mrs_laser_maps::SurfelMapInterface* model, mrs_laser_maps::SurfelMapInterface* scene,
                               Eigen::Matrix4d& transform);
-  bool estimatePoseCovarianceUnscented(Eigen::Matrix<double, 6, 6>& poseCov, MapType* model, MapType* scene,
+  bool estimatePoseCovarianceUnscented(Eigen::Matrix<double, 6, 6>& poseCov, mrs_laser_maps::SurfelMapInterface* model, mrs_laser_maps::SurfelMapInterface* scene,
                                        Eigen::Matrix4d& transform);
 
   void setPriorPoseEnabled(bool enabled)
@@ -185,13 +227,7 @@ public:
   Eigen::Matrix<double, 6, 1> transform2Pose(const Eigen::Matrix4d& transform, double& qw_sign);
   Eigen::Matrix4d pose2Transform(const Eigen::Matrix<double, 6, 1>& pose, double qw_sign);
 
-  double prior_prob_;
-
-  double sigma_size_factor_;
-
-  double soft_assoc_c1_, soft_assoc_c2_, soft_assoc_c3_;
-
-  bool associate_once_;
+ 
 
 protected:
   bool registrationErrorFunctionLM(const Eigen::Matrix<double, 6, 1>& x,
@@ -209,6 +245,15 @@ protected:
 
   Eigen::Matrix<double, 6, 6> last_cov_;
 
+  double prior_prob_;
+
+  double sigma_size_factor_;
+
+  double soft_assoc_c1_, soft_assoc_c2_, soft_assoc_c3_;
+
+  bool associate_once_;
+  
+  int max_iterations_;
   // 		tbb::task_scheduler_init init_;
 
 public:

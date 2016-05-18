@@ -44,175 +44,41 @@
 #include <pcl/common/eigen.h>
 
 #include <mrs_laser_maps/grid_cell.h>
+#include <mrs_laser_maps/surfel_map_interface.h>
+#include <mrs_laser_maps/surfel.h>
 
 namespace mrs_laser_maps
 {
-	const unsigned int MAX_NUM_SURFELS = 6;
-	const double MIN_SURFEL_POINTS = 10.0;
-	const double MAX_SURFEL_POINTS = 10000.0;
 
-class Surfel
+template <class PointType = pcl::PointXYZ, class BufferType = boost::circular_buffer_space_optimized<PointType> >
+class GridCellWithStatistics : public GridCell<PointType, BufferType>, public SurfelCellInterface
 {
 public:
-  Surfel()
-  {
-    clear();
-  }
+  typedef typename boost::shared_ptr<BufferType> CircularBufferPtr;
+  typedef typename BufferType::iterator CircularBufferIterator;
 
-  ~Surfel()
-  {
-  }
-
-  inline void clear()
-  {
-    num_points_ = 0.0;
-    mean_.setZero();
-    cov_.setZero();
-    sum_.setZero();
-    sum_squares_.setZero();
-
-    up_to_date_ = false;
-    unevaluated_ = false;
-  }
-
-  inline Surfel& operator+=(const Surfel& rhs)
-  {
-    if (rhs.num_points_ > 0 && num_points_ < MAX_SURFEL_POINTS)
-    {
-      // numerically stable one-pass update scheme
-      if (num_points_ == 0)
-      {
-        sum_squares_ = rhs.sum_squares_;
-        sum_ = rhs.sum_;
-        num_points_ = rhs.num_points_;
-      }
-      else
-      {
-        const Eigen::Matrix<double, 3, 1> deltaS = rhs.num_points_ * sum_ - num_points_ * rhs.sum_;
-        sum_squares_ +=
-            rhs.sum_squares_ +
-            1.0 / (num_points_ * rhs.num_points_ * (rhs.num_points_ + num_points_)) * deltaS * deltaS.transpose();
-        sum_ += rhs.sum_;
-        num_points_ += rhs.num_points_;
-      }
-
-      first_view_dir_ = rhs.first_view_dir_;
-      up_to_date_ = false;
-    }
-
-    return *this;
-  }
-
-  inline void add(const Eigen::Matrix<double, 3, 1>& point)
-  {
-    // numerically stable one-pass update scheme
-    if (num_points_ < std::numeric_limits<double>::epsilon())
-    {
-      sum_ += point;
-      num_points_ += 1.0;
-      up_to_date_ = false;
-    }
-    else if (num_points_ < MAX_SURFEL_POINTS)
-    {
-      const Eigen::Matrix<double, 3, 1> deltaS = (sum_ - num_points_ * point);
-      sum_squares_ += 1.0 / (num_points_ * (num_points_ + 1.0)) * deltaS * deltaS.transpose();
-      sum_ += point;
-      num_points_ += 1.0;
-      up_to_date_ = false;
-    }
-  }
-
-  inline void evaluate()
-  {
-    double det = 0.0;
-
-    curvature_ = 1.0;
-
-    if (num_points_ > 0)
-    {
-      mean_ = sum_ / num_points_;
-    }
-
-    if (num_points_ >= MIN_SURFEL_POINTS)
-    {
-      cov_ = sum_squares_ / (num_points_ - 1.0);
-
-      // enforce symmetry..
-      cov_(1, 0) = cov_(0, 1);
-      cov_(2, 0) = cov_(0, 2);
-      cov_(2, 1) = cov_(1, 2);
-    }
-    
-    det = cov_.determinant();
-
-    // not enough points or surfel degenerate
-    if (num_points_ < MIN_SURFEL_POINTS || det <= std::numeric_limits<double>::epsilon())
-    {
-    }
-    else
-    {
-      Eigen::Matrix<double, 3, 1> eigen_values_;
-      Eigen::Matrix<double, 3, 3> eigen_vectors_;
-
-      // eigen vectors are stored in the columns
-      pcl::eigen33(cov_, eigen_vectors_, eigen_values_);
-
-      normal_ = eigen_vectors_.col(0);
-      if (normal_.dot(first_view_dir_) > 0.0)
-        normal_ *= -1.0;
-    }
-
-    up_to_date_ = true;
-    unevaluated_ = false;
-  }
-
-  inline void unevaluate()
-  {
-    //			if( num_points_ > 0.0 ) {
-    //
-    //				mean_ *= num_points_;
-    //				cov_ *= (num_points_-1.0);
-    //
-    //				unevaluated_ = true;
-    //
-    //			}
-  }
-
-  Eigen::Matrix<double, 3, 1> first_view_dir_;
-
-  double num_points_;
-
-  double curvature_;
-
-  Eigen::Matrix<double, 3, 1> mean_, sum_;
-  Eigen::Matrix<double, 3, 1> normal_;
-  Eigen::Matrix<double, 3, 3> cov_, sum_squares_;
-  bool up_to_date_, unevaluated_;
-
-public:
-  EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
-
-private:
-};
-
-template <typename PointType>
-class GridCellWithStatistics : public GridCell<PointType>
-{
-public:
-  typedef boost::circular_buffer<PointType> CircularBuffer;
-  typedef boost::shared_ptr<boost::circular_buffer_space_optimized<PointType>> CircularBufferPtr;
-  typedef typename CircularBuffer::iterator CircularBufferIterator;
-
-  GridCellWithStatistics(int capacity = 100) : GridCell<PointType>(capacity)
+  GridCellWithStatistics(int capacity = 100) : GridCell<PointType, BufferType>(capacity)
+  , not_added_(0)
   {
   }
 
-  void evaluate()
+  GridCellWithStatistics(const GridCellWithStatistics& cell) 
+  : GridCell<PointType, BufferType>(cell)
+  , surfel_(cell.surfel_)
+  , not_added_(cell.not_added_)
+  {
+  }
+  
+  ~GridCellWithStatistics() 
+  {
+  }
+  
+  void evaluate() 
   {
     mrs_laser_maps::Surfel surfel;
-    boost::shared_ptr<boost::circular_buffer_space_optimized<PointType>> buffer = this->getPoints();
+    CircularBufferPtr buffer = this->getPoints();
 
-    for (typename boost::circular_buffer<PointType>::iterator it_cell = buffer->begin(); it_cell != buffer->end();
+    for (CircularBufferIterator it_cell = buffer->begin(); it_cell != buffer->end();
          it_cell++)
     {
       Eigen::Matrix<double, 3, 1> pos;
@@ -231,9 +97,9 @@ public:
   void evaluate(unsigned int skipScan)
   {
     mrs_laser_maps::Surfel surfel;
-    boost::shared_ptr<boost::circular_buffer_space_optimized<PointType>> buffer = this->getPoints();
+    CircularBufferPtr buffer = this->getPoints();
 
-    for (typename boost::circular_buffer<PointType>::iterator it_cell = buffer->begin(); it_cell != buffer->end();
+    for ( CircularBufferIterator it_cell = buffer->begin(); it_cell != buffer->end();
          it_cell++)
     {
       if ((*it_cell).scanNr != skipScan)
@@ -250,16 +116,96 @@ public:
     surfel_ += surfel;
     surfel_.evaluate();
   }
+   
+  void addPoint(const PointType &p)
+  {
+    GridCell<PointType,BufferType>::addPoint(p);
+    surfel_.unevaluate();
+  }
+   
+   
+  inline void addPoint(const boost::shared_ptr<PointType> &p)
+  {
+  }
+  
+/*  void addPoint(const PointType &p)
+  {
+    if (surfel_.num_points_ > MIN_SURFEL_POINTS)
+    {
+      Eigen::Matrix<double, 3, 1> point;
+      point(0) = p.x;
+      point(1) = p.y;
+      point(2) = p.z;
+      
+      double mdist = sqrt((point - surfel_.mean_).transpose() * surfel_.cov_.inverse() * (point - surfel_.mean_));
+      if (mdist > 2.0) 
+      {
+	ROS_INFO_STREAM_THROTTLE(0.25, "mahalanobis dist: " << mdist << " for point " << point << " and mean " << surfel_.mean_ << " with cov " << surfel_.cov_ << " not added " << not_added_);
+	GridCell<PointType>::addPoint(p);
+      }
+      else 
+      {
+	not_added_++;
+      }
+    }
+    else
+    {
+       GridCell<PointType>::addPoint(p);
+    }
+  }
+ */  
 
+
+  inline bool getPointByLabel(unsigned int label, PointType& point )
+  {  
+    return false;
+  }
+  
+  inline bool updateByLabel(const PointType& point )
+  {  
+    return false;
+  }
+  
   void erasePoint(CircularBufferIterator& it)
   {
     it = this->getPoints()->erase(it);
+    surfel_.unevaluate();
   }
 
+  inline const mrs_laser_maps::Surfel& getSurfel() const
+  {
+    return surfel_;
+  }
+  
   Surfel surfel_;
 
+  int not_added_;
 private:
 };
+
+//template <>
+//inline void GridCellWithStatistics<PointXYZRGBScanLabel, mrs_laser_maps::cell_buffer<PointXYZRGBScanLabel>>::addPoint(const boost::shared_ptr<PointXYZRGBScanLabel>& p)
+//{
+//  GridCell<PointXYZRGBScanLabel,mrs_laser_maps::cell_buffer<PointXYZRGBScanLabel>>::addPoint(p);
+//  surfel_.unevaluate();
+//}
+
+//template <>
+//inline bool GridCellWithStatistics<PointXYZRGBScanLabel, mrs_laser_maps::cell_buffer<PointXYZRGBScanLabel>>::getPointByLabel(unsigned int label, PointXYZRGBScanLabel& point )
+//{
+//  
+//  
+//  return ( this->getPoints()->find(label, point) );
+//  
+//}
+
+//template <>
+//inline bool GridCellWithStatistics<PointXYZRGBScanLabel, mrs_laser_maps::cell_buffer<PointXYZRGBScanLabel>>::updateByLabel(const PointXYZRGBScanLabel& point )
+//{
+//  return this->getPoints()->update(point);
+//
+//}
+
 }
 
 #endif

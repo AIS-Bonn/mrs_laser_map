@@ -46,32 +46,35 @@
 #include <pcl/point_types.h>
 
 #include <mrs_laser_maps/grid_cell_with_statistics.h>
+// #include <mrs_laser_maps/cell_buffer.h>
+#include <mrs_laser_maps/surfel_map_interface.h>
 
 namespace mrs_laser_maps
 {
 	
   static const float OCCUPANCY_UNKNOWN = 0.5f;
 
-template <typename PointT = pcl::PointXYZ>
+template <typename PointT = pcl::PointXYZ, typename BufferType = boost::circular_buffer_space_optimized<PointT> >
 class MapLevel
 {
-public:
-  typedef GridCellWithStatistics<PointT> GridCellType;
-
-  typedef boost::shared_ptr<MapLevel<PointT>> MapLevelPtr;
+public:  
+  
+  typedef boost::shared_ptr<MapLevel<PointT, BufferType>> Ptr;
+  typedef boost::shared_ptr<MapLevel<PointT, BufferType>> MapLevelPtr;
 
   typedef pcl::PointCloud<PointT> PointCloud;
-  typedef boost::shared_ptr<PointCloud> PointCloudPtr;
-
-  typedef boost::circular_buffer<PointT> CircularBuffer;
-  typedef boost::shared_ptr<boost::circular_buffer_space_optimized<PointT>> CircularBufferPtr;
-  typedef typename CircularBuffer::iterator CircularBufferIterator;
-
+  typedef typename PointCloud::Ptr PointCloudPtr;  
+  
+  typedef typename boost::shared_ptr<BufferType> CircularBufferPtr;
+  typedef typename BufferType::iterator CircularBufferIterator;
+  typedef GridCellWithStatistics<PointT, BufferType> GridCellType;
+  
   typedef std::vector<GridCellType, Eigen::aligned_allocator<GridCellType>> AlignedCellVector;
-
   typedef std::vector<GridCellType*> CellPointerVector;
 
   MapLevel(int size_in_meters = 10, float resolution = 4, int cell_capacity = 100);
+  MapLevel(const MapLevel &level );
+
   ~MapLevel();
 
   void initMap();
@@ -80,12 +83,15 @@ public:
 
   void evaluateAll();
 
-
-
+//   template<typename U = PointT, typename std::enable_if<!std::is_same<U, pcl::PointXYZ>::value, int>::type = 0>
+  void evaluateAll ( unsigned int skipScan );
+  
   void unEvaluateAll();
 
-  void set(const PointT& p, bool update_occupancy = true);
-
+  bool set(const PointT& p, bool update_occupancy = true);
+  
+  void set(const PointCloudPtr& points_in_map_frame, bool update_occupancy = true);
+  
   inline double getResolution()
   {
     return resolution_;
@@ -96,22 +102,24 @@ public:
     return 1.f / resolution_;
   }
 
-  inline double getCellSize(int l)
-  {
-    return getCellSize();
-  }
-
   bool inCenter(int x, int y, int z);
 
-  // TODO: pcl::PointXYZ to Eigen::Vector3f>
   void getOccupiedCells(std::vector<pcl::PointXYZ>& cells, bool omit_center = false );
 
   void getOccupiedCells(AlignedCellVector& cells, bool omit_center = false);
 
   void getOccupiedCellsWithOffset(AlignedCellVector& cells, std::vector<Eigen::Vector3f>& offsets, bool omit_center);
-
+  
   void getOccupiedCellsWithOffset(CellPointerVector& cells, std::vector<Eigen::Vector3f>& offsets, bool omit_center);
-
+ 
+  void getOccupiedCellsWithOffset(mrs_laser_maps::SurfelMapInterface::CellPtrVector& cells, std::vector<Eigen::Vector3f>& offsets, bool omit_center)
+  {
+    getCellsWithOffset(cells, offsets, omit_center, OCCUPANCY_UNKNOWN); 
+  }
+  
+  void getCellsWithOffset(mrs_laser_maps::SurfelMapInterface::CellPtrVector& cells, std::vector<Eigen::Vector3f>& offsets, bool omit_center,
+                          float occupancy_threshold = OCCUPANCY_UNKNOWN);
+  
   void getCellsWithOffset(CellPointerVector& cells, std::vector<Eigen::Vector3f>& offsets, bool omit_center,
                           float occupancy_threshold = OCCUPANCY_UNKNOWN);
 
@@ -121,15 +129,21 @@ public:
 
   unsigned int getNumCellPoints();
 
-  bool getCell(const Eigen::Vector3f& point, std::vector<GridCellType*>& cell_ptrs,
+  bool getCell(const Eigen::Vector3f& point, mrs_laser_maps::SurfelMapInterface::CellPtrVector& cell_ptrs,
                std::vector<Eigen::Vector3f, Eigen::aligned_allocator<Eigen::Vector3f>>& cell_offsets,
                std::vector<int>& levels, int level, int neighbors = 0);
 
   inline void setAllOccupancies(float occupancy);
 
-  bool getCell(const Eigen::Vector3f& point, GridCellType*& cellPtr, Eigen::Vector3f& cell_offset,
-               bool include_empty = false);
+  bool getCell(const Eigen::Vector3f& point, SurfelCellInterface*& cell_ptr, Eigen::Vector3f& cell_offset,
+               bool include_empty = false)
+  {
+    return getCell(point, cell_ptr, cell_offset, include_empty);
+  }
 
+  bool getCell(const Eigen::Vector3f& point, GridCellType*& cell_ptr, Eigen::Vector3f& cell_offset,
+               bool include_empty = false);
+  
   int getCellPoints(const pcl::PointXYZ& point, PointCloudPtr cell_points);
 
   inline int getLocalCell(const pcl::PointXYZ& point, CircularBufferIterator& begin, CircularBufferIterator& end,
@@ -146,13 +160,8 @@ public:
     return toCellCoordinate(point, point_in_cell_coords, x, y, z);
   }
 
-  inline pcl::PointXYZ getOdomentryIncrement()
-  {
-    return translation_increment_;
-  }
-
-  void insertRay(const PointT& p, const Eigen::Matrix4f& sensor_transform);
-
+  bool insertRay(const PointT& p, const Eigen::Matrix4f& sensor_transform );
+  
   void translateMap(const Eigen::Vector3f& translation);
   void moveMap(const Eigen::Vector3f& translation);
 
@@ -195,12 +204,19 @@ public:
 
   void deleteCellPointsByScanLabel(PointCloudPtr points, unsigned int scan_id, bool omit_center = false);
 
+  void deleteCellPointsByScanLabel(PointCloudPtr points, unsigned int scan_id, unsigned int scan_line_id, 
+				   bool omit_center = false);
+
+#ifdef DEBUG_CELL_HITS  
+  void printCellDebugInfo();
+#endif
+  
 protected:
-  bool calcIndices(const PointT& p, int& x, int& y, int& z) const;
-  bool calcIndices(const Eigen::Vector3f& p, int& x, int& y, int& z) const;
+  inline bool calcIndices(const PointT& p, int& x, int& y, int& z) const;
+  inline bool calcIndices(const Eigen::Vector3f& p, int& x, int& y, int& z) const;
 
   template <typename U = PointT, typename std::enable_if<!std::is_same<U, pcl::PointXYZ>::value, int>::type = 0>
-  bool calcIndices(const pcl::PointXYZ& p, int& x, int& y, int& z) const
+  inline bool calcIndices(const pcl::PointXYZ& p, int& x, int& y, int& z) const
   {
     return calcIndices(p.getVector3fMap(), x, y, z);
   }
@@ -215,6 +231,7 @@ protected:
   */
   void cellToMapFrame(Eigen::Vector3f& point_in_map, int x, int y, int z);
 
+   
 private:
   unsigned int size_;
   float resolution_;

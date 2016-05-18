@@ -41,14 +41,16 @@
 
 namespace mrs_laser_maps
 {
-template <typename MapPointType>
-MultiResolutionalMap<MapPointType>::MultiResolutionalMap(int size, float resolution, int levels, int cellCapacity,
+template <typename MapPointType, typename BufferType>
+MultiResolutionalMap<MapPointType, BufferType>::MultiResolutionalMap(int size, float resolution, int levels, int cellCapacity,
                                                    std::string frameId)
   : size_(size)
   , resolution_(resolution)
   , frame_id_(frameId)
   , cell_capacity_(cellCapacity)
   , last_update_stamp_(0)
+  , scan_number_(0)
+  , evaluated_(false)
 {
   initMap();
 
@@ -56,7 +58,7 @@ MultiResolutionalMap<MapPointType>::MultiResolutionalMap(int size, float resolut
   {
     float levelSize = size / pow(2, (i));
     float cellsPerMeter = 1 / (levelSize / (2.f * resolution));
-    MapLevelPtr map_ptr(new MapLevel<MapPointType>(levelSize, cellsPerMeter, cellCapacity));
+    MapLevelPtr map_ptr(boost::make_shared<MapLevelType>(levelSize, cellsPerMeter, cellCapacity));
     level_maps_.insert(level_maps_.begin(), map_ptr);
     ROS_DEBUG_NAMED("map", "creating map layer with %f length and %f resolution", levelSize, map_ptr->getResolution());
   }
@@ -67,78 +69,66 @@ MultiResolutionalMap<MapPointType>::MultiResolutionalMap(int size, float resolut
   }
 }
 
-template <typename MapPointType>
-MultiResolutionalMap<MapPointType>::MultiResolutionalMap(MultiResolutionalMap& map)
-  : size_(map.getSizeInMeters())
-  , resolution_(map.getResolution())
-  , frame_id_(map.getFrameId())
-  , cell_capacity_(map.getCellCapacity())
-  , last_update_stamp_(0)
+template <typename MapPointType, typename BufferType>
+MultiResolutionalMap<MapPointType, BufferType>::MultiResolutionalMap(const MultiResolutionalMap& map)
+   : size_(map.getSizeInMeters())
+   , resolution_(map.getResolution())
+   , frame_id_(map.getFrameId())
+   , cell_capacity_(map.getCellCapacity())
+   , last_update_stamp_(map.getLastUpdateTimestamp())
+   , scan_number_(map.getScanNumber())
+   , evaluated_(map.isEvaluated())
 {
-  initMap();
-  int levels = map.getLevels();
+  for ( auto level: map.level_maps_)
+    level_maps_.push_back(boost::make_shared<MapLevel<MapPointType>>(*level.get())); 
 
-  for (int i = 0; i < levels; i++)
+  for (int i = 1; i < level_maps_.size() ; i++)
   {
-    float levelSize = size_ / pow(2, (i));
-    float cellsPerMeter = 1 / (levelSize / (2.f * resolution_));
-    MapLevelPtr map_ptr(new MapLevel<MapPointType>(levelSize, cellsPerMeter, cell_capacity_));
-    level_maps_.insert(level_maps_.begin(), map_ptr);
-    ROS_DEBUG("creating map layer with %f length and %f resolution", levelSize, map_ptr->getResolution());
+    level_maps_[i-1]->setCoarserLevel(level_maps_[i]);
   }
-
-  for (unsigned int i = 0; i < level_maps_.size(); i++)
-  {
-    PointCloudPtr points(new pcl::PointCloud<MapPointType>());
-    map.getCellPoints(points, i);
-    for (size_t j = 0; j < points->size(); j++)
-    {
-      level_maps_[i]->set(points->points[j]);
-    }
-  }
-
-  for (int i = 0; i < levels - 1; i++)
-  {
-    level_maps_[i]->setCoarserLevel(level_maps_[i + 1]);
-  }
+  ROS_DEBUG_NAMED("map", "MultiResolutionalMap<MapPointType, BufferType>::MultiResolutionalMap(const MultiResolutionalMap& map)");
 }
 
-template <typename MapPointType>
-void MultiResolutionalMap<MapPointType>::initMap()
+template <typename MapPointType, typename BufferType>
+void MultiResolutionalMap<MapPointType, BufferType>::initMap()
 {
 }
 
-template <typename MapPointType>
-void MultiResolutionalMap<MapPointType>::moveMap(const Eigen::Vector3f& translation)
-{
-  for (unsigned int i = 0; i < level_maps_.size(); i++)
-  {
-    level_maps_[i]->moveMap(translation);
-  }
-}
-
-template <typename MapPointType>
-void MultiResolutionalMap<MapPointType>::translateMap(const Eigen::Vector3f& translation)
+template <typename MapPointType, typename BufferType>
+void MultiResolutionalMap<MapPointType, BufferType>::translateMap(const Eigen::Vector3f& translation)
 {
   for (LevelListReverseIterator it = level_maps_.rbegin(); it != level_maps_.rend(); ++it)
   {
     (*it)->translateMap(translation);
   }
+  
+  evaluated_ = false;
 }
 
-template <typename MapPointType>
-void MultiResolutionalMap<MapPointType>::getOccupiedCells(std::vector<pcl::PointXYZ>& cells )
+template <typename MapPointType, typename BufferType>
+void MultiResolutionalMap<MapPointType, BufferType>::set(const MapPointType& p, bool update_occupancy)
+{
+  for (auto& level : boost::adaptors::reverse(level_maps_) )
+  {
+    // if not added in this level (point not in map level) we can skip the finer levels 
+    if (!level->set(p, update_occupancy))
+      break;
+  }
+  evaluated_ = false;
+}
+
+template <typename MapPointType, typename BufferType>
+void MultiResolutionalMap<MapPointType, BufferType>::getOccupiedCells(std::vector<pcl::PointXYZ>& cells )
 {
   cells.clear();
-
-  for (size_t i = 0; i < level_maps_.size(); i++)
+  for (const MapLevelPtr& level : level_maps_)
   {
-    level_maps_[i]->getOccupiedCells(cells );
+    level->getOccupiedCells(cells );
   }
 }
 
-template <typename MapPointType>
-void MultiResolutionalMap<MapPointType>::getOccupiedCells(std::vector<pcl::PointXYZ>& cells, int level)
+template <typename MapPointType, typename BufferType>
+void MultiResolutionalMap<MapPointType, BufferType>::getOccupiedCells(std::vector<pcl::PointXYZ>& cells, int level)
 {
   cells.clear();
 
@@ -148,8 +138,8 @@ void MultiResolutionalMap<MapPointType>::getOccupiedCells(std::vector<pcl::Point
   }
 }
 
-template <typename MapPointType>
-void MultiResolutionalMap<MapPointType>::getOccupiedCells(AlignedCellVector& cells, int level)
+template <typename MapPointType, typename BufferType>
+void MultiResolutionalMap<MapPointType, BufferType>::getOccupiedCells(AlignedCellVector& cells, int level)
 {
   cells.clear();
 
@@ -161,15 +151,20 @@ void MultiResolutionalMap<MapPointType>::getOccupiedCells(AlignedCellVector& cel
   }
 }
 
-template <typename MapPointType>
-void MultiResolutionalMap<MapPointType>::getOccupiedCellsWithOffset(CellPointerVector& cells,
-                                                              std::vector<Eigen::Vector3f>& offsets, int level)
+template <typename MapPointType, typename BufferType>
+void MultiResolutionalMap<MapPointType, BufferType>::getOccupiedCellsWithOffset(mrs_laser_maps::SurfelMapInterface::CellPtrVector& cells, std::vector<Eigen::Vector3f>& offsets,
+                                                      int level)
 {
-  getCellsWithOffset(cells, offsets, level, OCCUPANCY_UNKNOWN);
+  cells.clear();
+
+  if (level >= 0 && level < static_cast<int>(level_maps_.size()))
+  {
+    level_maps_[level]->getCellsWithOffset(cells, offsets, (level > 0), OCCUPANCY_UNKNOWN);
+  }
 }
 
-template <typename MapPointType>
-void MultiResolutionalMap<MapPointType>::getCellsWithOffset(CellPointerVector& cells, std::vector<Eigen::Vector3f>& offsets,
+template <typename MapPointType, typename BufferType>
+void MultiResolutionalMap<MapPointType, BufferType>::getCellsWithOffset(CellPointerVector& cells, std::vector<Eigen::Vector3f>& offsets,
                                                       int level, float occupancyThreshold)
 {
   cells.clear();
@@ -180,140 +175,176 @@ void MultiResolutionalMap<MapPointType>::getCellsWithOffset(CellPointerVector& c
   }
 }
 
-template <typename MapPointType>
-void MultiResolutionalMap<MapPointType>::getOccupiedCellsWithOffset(AlignedCellVector& cells,
+template <typename MapPointType, typename BufferType>
+void MultiResolutionalMap<MapPointType, BufferType>::getOccupiedCellsWithOffset(AlignedCellVector& cells,
                                                               std::vector<Eigen::Vector3f>& offsets, int level)
 {
-  // 	mutex_.lock();
-
   cells.clear();
 
   if (level >= 0 && level < static_cast<int>(level_maps_.size()))
   {
     level_maps_[level]->getOccupiedCellsWithOffset(cells, offsets, (level > 0));
   }
-
-  // 	mutex_.unlock();
 }
 
-template <typename MapPointType>
-void MultiResolutionalMap<MapPointType>::getOccupiedCellsWithOffset(CellPointerVector& cells,
+
+template <typename MapPointType, typename BufferType>
+void MultiResolutionalMap<MapPointType, BufferType>::getOccupiedCellsWithOffset(CellPointerVector& cells,
                                                               std::vector<Eigen::Vector3f>& offsets)
 {
-  // 	mutex_.lock();
-
   cells.clear();
   offsets.clear();
 
   for (size_t i = 0; i < level_maps_.size(); i++)
   {
-    // level_maps_[i]->getOccupiedCellsWithOffset( cells, offsets,  (i> 0) );
     level_maps_[i]->getOccupiedCellsWithOffset(cells, offsets, (i > 0));
   }
-
-  // 	mutex_.unlock();
 }
 
-template <typename MapPointType>
-void MultiResolutionalMap<MapPointType>::getCellPoints(PointCloudPtr points)
+template <typename MapPointType, typename BufferType>
+void MultiResolutionalMap<MapPointType, BufferType>::getOccupiedCellsWithOffset(mrs_laser_maps::SurfelMapInterface::CellPtrVector& cells,
+                                                              std::vector<Eigen::Vector3f>& offsets)
 {
-  // 	mutex_.lock();
+  cells.clear();
+  offsets.clear();
+
+  for (size_t i = 0; i < level_maps_.size(); i++)
+  {
+    level_maps_[i]->getOccupiedCellsWithOffset(cells, offsets, (i > 0));
+  }
+}
+
+template <typename MapPointType, typename BufferType>
+void MultiResolutionalMap<MapPointType, BufferType>::getCellPoints(PointCloudPtr points)
+{
   points->clear();
   for (size_t i = 0; i < level_maps_.size(); i++)
   {
     level_maps_[i]->getCellPoints(points, (i > 0));
-    // level_maps_[i]->getCellPoints( points, false );
   }
-
-  // 	mutex_.unlock();
 }
 
-template <typename MapPointType>
-void MultiResolutionalMap<MapPointType>::getCellPointsDownsampled(PointCloudPtr points, unsigned int pointsPerCell)
+template <typename MapPointType, typename BufferType>
+void MultiResolutionalMap<MapPointType, BufferType>::getCellPointsDownsampled(PointCloudPtr points, unsigned int pointsPerCell)
 {
-  // 	mutex_.lock();
   points->clear();
 
   for (LevelListIterator it = level_maps_.begin(); it != level_maps_.end(); ++it)
   {
     (*it)->getCellPointsDownsampled(points, pointsPerCell);
   }
-  // 	mutex_.unlock();
 }
 
-template <typename MapPointType>
-void MultiResolutionalMap<MapPointType>::getCellPoints(PointCloudPtr points, int level)
+template <typename MapPointType, typename BufferType>
+void MultiResolutionalMap<MapPointType, BufferType>::getCellPoints(PointCloudPtr points, int level)
 {
-  // 	mutex_.lock();
-
   if (level >= 0 && level < static_cast<int>(level_maps_.size()))
   {
     level_maps_[level]->getCellPoints(points);
   }
-
-  // 	mutex_.unlock();
 }
 
-template <typename MapPointType>
-unsigned int MultiResolutionalMap<MapPointType>::getNumCellPoints()
+template <typename MapPointType, typename BufferType>
+unsigned int MultiResolutionalMap<MapPointType, BufferType>::getNumCellPoints()
 {
   unsigned int num = 0;
   for (size_t i = 0; i < level_maps_.size(); i++)
   {
     num += level_maps_[i]->getNumCellPoints();
-    //		ROS_INFO("points in level %d %d", i, level_maps_[i]->getNumCellPoints());
   }
-
+// ROS_INFO_STREAM("getNumCellPoints: " << num); 
   return num;
 }
 
+template <typename MapPointType, typename BufferType>
+bool MultiResolutionalMap<MapPointType, BufferType>::getCell(const Eigen::Vector3f& point, mrs_laser_maps::SurfelMapInterface::CellPtrVector& cellPtrs,
+                      std::vector<Eigen::Vector3f, Eigen::aligned_allocator<Eigen::Vector3f>>& cellOffsets,
+                      std::vector<int>& levels, int neighbors, bool reverse)
+  {
+    if (reverse)
+    {
+      for (int i = level_maps_.size() - 1; i >= 0; --i)
+      {
+        if (level_maps_[i]->getCell(point, cellPtrs, cellOffsets, levels, i, neighbors))
+        {
+          return true;
+        }
+      }
+    }
+    else
+    {
+      for (unsigned int i = 0; i < level_maps_.size(); i++)
+      {
+        if (level_maps_[i]->getCell(point, cellPtrs, cellOffsets, levels, i, neighbors))
+        {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+template <typename MapPointType, typename BufferType>
+void MultiResolutionalMap<MapPointType, BufferType>::addCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, bool updateOccupancy, const Eigen::Matrix4f& origin)
+{
+  PointCloudPtr cloud_map_type(new PointCloud);
+  pcl::copyPointCloud(*cloud, *cloud_map_type);
+  addCloudInner(cloud_map_type, updateOccupancy, origin);
+}
+
+template <typename MapPointType, typename BufferType>
+void MultiResolutionalMap<MapPointType, BufferType>::addCloud(pcl::PointCloud<pcl::PointXYZI>::Ptr cloud, bool updateOccupancy, const Eigen::Matrix4f& origin)
+{
+  PointCloudPtr cloud_map_type(new PointCloud);
+  pcl::copyPointCloud(*cloud, *cloud_map_type);
+  addCloudInner(cloud_map_type, updateOccupancy, origin);
+}
+
+template <typename MapPointType, typename BufferType>
+void MultiResolutionalMap<MapPointType, BufferType>::addCloud(pcl::PointCloud<PointXYZScanLine>::Ptr cloud, bool updateOccupancy, const Eigen::Matrix4f& origin)
+{
+  PointCloudPtr cloud_map_type(new PointCloud);
+  pcl::copyPointCloud(*cloud, *cloud_map_type);
+  addCloudInner(cloud_map_type, updateOccupancy, origin);
+}
+
+template <typename MapPointType, typename BufferType>
+void MultiResolutionalMap<MapPointType, BufferType>::addCloud(pcl::PointCloud<PointXYZRGBScanLabel>::Ptr cloud, bool updateOccupancy, const Eigen::Matrix4f& origin)
+{
+  PointCloudPtr cloud_map_type(new PointCloud);
+  pcl::copyPointCloud(*cloud, *cloud_map_type);
+  addCloudInner(cloud_map_type, updateOccupancy, origin);
+}
+
 // template <>
-// void MultiResolutionalMap<PointXYZRGBScanLabel>::addCloud(pcl::PointCloud<PointXYZScanLine>::Ptr cloud, bool updateOccupancy, const Eigen::Matrix4f& origin)
+// void MultiResolutionalMap<PointXYZRGBScanLabel, mrs_laser_maps::cell_buffer<PointXYZRGBScanLabel>>::setScanNumber(pcl::PointCloud<PointXYZRGBScanLabel>::Ptr cloud)
 // {
-//  	
-// // 	pcl::PointCloud<mrs_laser_maps::MapMapPointTypeype>::Ptr cloud_map_type(new pcl::PointCloud<mrs_laser_maps::MapMapPointTypeype>); // TODO
-// //   
-// //   pcl::copyPointCloud(*cloud_map_type, *cloud_map_type);
-// //   double scanNumberNormalized = fmod((static_cast<double>(scan_number_) / 25.0), 1.0);
-// //   for (size_t i = 0; i < cloud_map_type->size(); ++i)
-// //   {
-// //     cloud_map_type->points[i].r = static_cast<int>(255.f * ColorMapJet::red(scanNumberNormalized));
-// //     cloud_map_type->points[i].g = static_cast<int>(255.f * ColorMapJet::green(scanNumberNormalized));
-// //     cloud_map_type->points[i].b = static_cast<int>(255.f * ColorMapJet::blue(scanNumberNormalized));
-// //     cloud_map_type->points[i].scanNr = scan_number_;
-// //   }
-// 
+//   for (size_t i = 0; i < cloud->size(); ++i)
+//   {
+//     cloud->points[i].scanNr = scan_number_;
+//   }
+//   scan_number_++;
 // }
 
-template <typename MapPointType>
-void MultiResolutionalMap<MapPointType>::addCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, bool updateOccupancy, const Eigen::Matrix4f& origin)
+template <>
+void MultiResolutionalMap<PointXYZRGBScanLabel, boost::circular_buffer_space_optimized<PointXYZRGBScanLabel>>::setScanNumber(pcl::PointCloud<PointXYZRGBScanLabel>::Ptr cloud)
 {
-	PointCloudPtr cloud_map_type(new PointCloud);
-	pcl::copyPointCloud(*cloud, *cloud_map_type);
-	addCloudInner(cloud_map_type, updateOccupancy, origin);
+  for (auto& point : cloud->points)
+  {
+    point.scanNr = scan_number_;
+  }
+  scan_number_++;
 }
 
-template <typename MapPointType>
-void MultiResolutionalMap<MapPointType>::addCloud(pcl::PointCloud<PointXYZScanLine>::Ptr cloud, bool updateOccupancy, const Eigen::Matrix4f& origin)
+template <typename MapPointType, typename BufferType>
+void MultiResolutionalMap<MapPointType, BufferType>::addCloudInner(PointCloudPtr cloud, bool update_occupancy, const Eigen::Matrix4f& origin)
 {
- 	PointCloudPtr cloud_map_type(new PointCloud);
-	pcl::copyPointCloud(*cloud, *cloud_map_type);
-	addCloudInner(cloud_map_type, updateOccupancy, origin);
-}
-
-template <typename MapPointType>
-void MultiResolutionalMap<MapPointType>::addCloud(pcl::PointCloud<PointXYZRGBScanLabel>::Ptr cloud, bool updateOccupancy, const Eigen::Matrix4f& origin)
-{
- 	PointCloudPtr cloud_map_type(new PointCloud);
-	pcl::copyPointCloud(*cloud, *cloud_map_type);
-	addCloudInner(cloud_map_type, updateOccupancy, origin);
-}
-
-template <typename MapPointType>
-void MultiResolutionalMap<MapPointType>::addCloudInner(PointCloudPtr cloud, bool update_occupancy, const Eigen::Matrix4f& origin)
-{
+  ROS_DEBUG_STREAM_NAMED("map", "addCloudInner with scan_number_: " << scan_number_);
+  
   boost::mutex::scoped_lock lock(mutex_);
 
+  setScanNumber(cloud);
+  
   // unmark all endpoints
   setAllEndPointFlags(false);
   
@@ -334,22 +365,20 @@ void MultiResolutionalMap<MapPointType>::addCloudInner(PointCloudPtr cloud, bool
       set(cloud->points[i]);
   }
 
+#ifdef DEBUG_CELL_HITS  
+  for (MapLevelPtr l : level_maps_)
+  {
+    l->printCellDebugInfo();
+  }
+#endif
+  
+  evaluated_ = false;
   ros::Time last_update_time;
   setLastUpdateTimestamp(last_update_time.fromNSec(cloud->header.stamp));
 }
 
-template <typename MapPointType>
-pcl::PointXYZ MultiResolutionalMap<MapPointType>::getOdomentryIncrement(int level)
-{
-  if (level >= 0 && level < (int)level_maps_.size())
-  {
-    return level_maps_[level]->getOdomentryIncrement();
-  }
-  return pcl::PointXYZ();
-}
-
-template <typename MapPointType>
-void MultiResolutionalMap<MapPointType>::setUpdateMask(std::vector<std::vector<std::vector<bool>>>& updateMask)
+template <typename MapPointType, typename BufferType>
+void MultiResolutionalMap<MapPointType, BufferType>::setUpdateMask(std::vector<std::vector<std::vector<bool>>>& updateMask)
 {
   for (LevelListIterator it = level_maps_.begin(); it != level_maps_.end(); ++it)
   {
@@ -357,8 +386,8 @@ void MultiResolutionalMap<MapPointType>::setUpdateMask(std::vector<std::vector<s
   }
 }
 
-template <typename MapPointType>
-void MultiResolutionalMap<MapPointType>::setConicalUpdateMask(const Eigen::Vector3f& position,
+template <typename MapPointType, typename BufferType>
+void MultiResolutionalMap<MapPointType, BufferType>::setConicalUpdateMask(const Eigen::Vector3f& position,
                                                         const Eigen::Vector3f& orientation, float angle)
 {
   for (LevelListIterator it = level_maps_.begin(); it != level_maps_.end(); ++it)
@@ -367,8 +396,8 @@ void MultiResolutionalMap<MapPointType>::setConicalUpdateMask(const Eigen::Vecto
   }
 }
 
-template <typename MapPointType>
-void MultiResolutionalMap<MapPointType>::setOccupancyParameters(float clampingThreshMin, float clampingThreshMax,
+template <typename MapPointType, typename BufferType>
+void MultiResolutionalMap<MapPointType, BufferType>::setOccupancyParameters(float clampingThreshMin, float clampingThreshMax,
                                                           float probHit, float probMiss)
 {
   for (LevelListIterator it = level_maps_.begin(); it != level_maps_.end(); ++it)
@@ -376,6 +405,32 @@ void MultiResolutionalMap<MapPointType>::setOccupancyParameters(float clampingTh
     (*it)->setOccupancyParameters(clampingThreshMin, clampingThreshMax, probHit, probMiss);
   }
 }
+
+template <typename MapPointType, typename BufferType>
+void MultiResolutionalMap<MapPointType, BufferType>::evaluateAll()
+{
+  if (evaluated_ == true)
+  {
+    ROS_INFO("calling evaluate all but map is already evaluated");
+  }
+  
+  for (const MapLevelPtr& level : level_maps_)
+  {
+    level->evaluateAll();
+  }
+  evaluated_ = true;
+}
+
+template <typename MapPointType, typename BufferType>
+void MultiResolutionalMap<MapPointType, BufferType>::unEvaluateAll()
+{
+  for (const MapLevelPtr& level : level_maps_)
+  {
+    level->unEvaluateAll();
+  }
+  evaluated_ = false;
+}
+
 }
 
 #endif

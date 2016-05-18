@@ -45,75 +45,79 @@
 
 #include <boost/circular_buffer.hpp>
 #include <boost/thread/mutex.hpp>
+#include <boost/range/adaptor/reversed.hpp>
 
 #include <mrs_laser_maps/map_point_types.h>
+#include <mrs_laser_maps/surfel_map_interface.h>
 #include <mrs_laser_maps/map_level.h>
 
 namespace mrs_laser_maps
 {
-template <typename MapPointType = pcl::PointXYZ>
-class MultiResolutionalMap
+template <typename MapPointType = pcl::PointXYZ, typename BufferType = boost::circular_buffer_space_optimized<MapPointType> >
+class MultiResolutionalMap : public SurfelMapInterface
 {
 public:
-  typedef GridCellWithStatistics<MapPointType> GridCellType;
+  
+  typedef typename mrs_laser_maps::MapLevel<MapPointType, BufferType>::GridCellType GridCellType;
 
-  typedef boost::shared_ptr<mrs_laser_maps::MapLevel<MapPointType>> MapLevelPtr;
+  typedef mrs_laser_maps::MapLevel<MapPointType, BufferType> MapLevelType;
+  typedef boost::shared_ptr<MapLevelType> MapLevelPtr;
   typedef boost::shared_ptr<MultiResolutionalMap<MapPointType>> MapPtr;
-
+  typedef boost::shared_ptr<MultiResolutionalMap<MapPointType>> Ptr;
+  
   typedef std::vector<MapLevelPtr> LevelList;
   typedef typename LevelList::iterator LevelListIterator;
   typedef typename LevelList::reverse_iterator LevelListReverseIterator;
 
   typedef std::vector<GridCellType, Eigen::aligned_allocator<GridCellType>> AlignedCellVector;
-
+  
   typedef typename std::vector<AlignedCellVector, Eigen::aligned_allocator<AlignedCellVector>> AlignedCellVectorVector;
 
   typedef std::vector<GridCellType*> CellPointerVector;
   typedef std::vector<CellPointerVector> CellPointerVectorVector;
 
   typedef pcl::PointCloud<MapPointType> PointCloud;
-  typedef boost::shared_ptr<PointCloud> PointCloudPtr;
+  typedef typename PointCloud::Ptr PointCloudPtr;
 
-  typedef typename MapLevel<MapPointType>::CircularBuffer CircularBuffer;
-  typedef typename MapLevel<MapPointType>::CircularBufferPtr CircularBufferPtr;
-  typedef typename MapLevel<MapPointType>::CircularBufferIterator CircularBufferIterator;
+  typedef typename MapLevel<MapPointType, BufferType>::CircularBufferPtr CircularBufferPtr;
+  typedef typename MapLevel<MapPointType, BufferType>::CircularBufferIterator CircularBufferIterator;
 
   MultiResolutionalMap(int size = 16, float resolution = 4, int levels = 4, int cell_capacity = 100,
                        std::string frame_id = "base_link");
 
   virtual ~MultiResolutionalMap()
   {
-    for (unsigned int i = 0; i < level_maps_.size(); i++)
-    {
-      level_maps_[i].reset();
-    }
+
   };
 
-  MultiResolutionalMap(MultiResolutionalMap& map);
+  MultiResolutionalMap(const MultiResolutionalMap& map);
 
   void initMap();
 
   void decreaseAll(float decrease_rate)
   {
-    for (auto level : level_maps_)
+    for (const MapLevelPtr& level : level_maps_)
     {
       level->decreaseAll(decrease_rate);
     }
+    evaluated_ = false;
   }
 
-  void set(const MapPointType& p, bool update_occupancy = true)
-  {
-    for (unsigned int i = 0; i < level_maps_.size(); i++)
-    {
-      level_maps_[i]->set(p, update_occupancy);
-    }
-  }
+  virtual void set(const MapPointType& p, bool update_occupancy = true);
 
   void setLevel(const MapPointType& p, size_t level)
   {
     if (level >= 0 && level < level_maps_.size())
     {
       level_maps_[level]->set(p);
+    }
+  }
+  
+  void setLevel(const PointCloudPtr& points, size_t level)
+  {
+    if (level >= 0 && level < level_maps_.size())
+    {
+      level_maps_[level]->set(points);
     }
   }
 
@@ -133,38 +137,25 @@ public:
     }
   }
 
-  void insertRay(const MapPointType& p, const Eigen::Matrix4f& origin)
+  virtual void insertRay(const MapPointType& p, const Eigen::Matrix4f& origin)
   {
-    for (MapLevelPtr l : level_maps_)
+    for (auto& level : boost::adaptors::reverse(level_maps_) )
     {
-      l->insertRay(p, origin);
+      level->insertRay(p, origin);
     }
+    evaluated_ = false;
   }
 
-  void evaluateAll()
-  {
-    for (unsigned int i = 0; i < level_maps_.size(); i++)
-    {
-      level_maps_[i]->evaluateAll();
-    }
-  }
+  void evaluateAll();
 
+  void unEvaluateAll();
 
-
-  void unEvaluateAll()
-  {
-    for (unsigned int i = 0; i < level_maps_.size(); i++)
-    {
-      level_maps_[i]->unEvaluateAll();
-    }
-  }
-
-  double getResolution()
+  inline double getResolution() const
   {
     return resolution_;
   }
 
-  unsigned int getLevels() const
+  inline unsigned int getLevels() const
   {
     return level_maps_.size();
   }
@@ -191,10 +182,12 @@ public:
   void getCellPointsDownsampled(PointCloudPtr points, unsigned int pointsPerCell);
 
   void getOccupiedCellsWithOffset(AlignedCellVector& cells, std::vector<Eigen::Vector3f>& offsets, int level);
-
-  void getOccupiedCellsWithOffset(CellPointerVector& cells, std::vector<Eigen::Vector3f>& offsets, int level);
-
+  
+  void getOccupiedCellsWithOffset(mrs_laser_maps::SurfelMapInterface::CellPtrVector& cells, std::vector<Eigen::Vector3f>& offsets, int level) ;
+  
   void getOccupiedCellsWithOffset(CellPointerVector& cells, std::vector<Eigen::Vector3f>& offsets);
+  
+  void getOccupiedCellsWithOffset(mrs_laser_maps::SurfelMapInterface::CellPtrVector& cells, std::vector<Eigen::Vector3f>& offsets);
 
   void getCellsWithOffset(CellPointerVector& cells, std::vector<Eigen::Vector3f>& offsets, int level,
                           float occupancyThreshold = OCCUPANCY_UNKNOWN);
@@ -210,11 +203,11 @@ public:
     return pointsNr;
   }
 
-  inline bool getCell(const Eigen::Vector3f& point, GridCellType*& cellPtr, Eigen::Vector3f& cellOffset, int& level)
+  inline bool getCell(const Eigen::Vector3f& point, GridCellType*& cell_ptr, Eigen::Vector3f& cell_offset, int& level)
   {
     for (unsigned int i = 0; i < level_maps_.size(); i++)
     {
-      if (level_maps_[i]->getCell(point, cellPtr, cellOffset))
+      if (level_maps_[i]->getCell(point, cell_ptr, cell_offset))
       {
         level = i;
         return true;
@@ -223,33 +216,28 @@ public:
     return false;
   }
 
-  inline bool getCell(const Eigen::Vector3f& point, std::vector<GridCellType*>& cellPtrs,
-                      std::vector<Eigen::Vector3f, Eigen::aligned_allocator<Eigen::Vector3f>>& cellOffsets,
-                      std::vector<int>& levels, int neighbors = 0, bool reverse = false)
+  bool getCell(const Eigen::Vector3f& point, SurfelCellInterface*& cell_ptr, Eigen::Vector3f& cellOffset, int& level) 
   {
-    if (reverse)
+    return getCell(point, cell_ptr, cellOffset, level);
+  }
+  
+  void getOccupiedCells(mrs_laser_maps::SurfelMapInterface::CellPtrVector& cells, int level) 
+  {
+    cells.clear();
+
+    std::vector<Eigen::Vector3f> offsets;
+
+    if (level >= 0 && level < static_cast<int>(level_maps_.size()))
     {
-      for (int i = level_maps_.size() - 1; i >= 0; --i)
-      {
-        if (level_maps_[i]->getCell(point, cellPtrs, cellOffsets, levels, i, neighbors))
-        {
-          return true;
-        }
-      }
+      level_maps_[level]->getOccupiedCellsWithOffset(cells, offsets, (level > 0));
     }
-    else
-    {
-      for (unsigned int i = 0; i < level_maps_.size(); i++)
-      {
-        if (level_maps_[i]->getCell(point, cellPtrs, cellOffsets, levels, i, neighbors))
-        {
-          return true;
-        }
-      }
-    }
-    return false;
   }
 
+    
+  bool getCell(const Eigen::Vector3f& point, mrs_laser_maps::SurfelMapInterface::CellPtrVector& cellPtrs,
+                      std::vector<Eigen::Vector3f, Eigen::aligned_allocator<Eigen::Vector3f>>& cellOffsets,
+                      std::vector<int>& levels, int neighbors = 0, bool reverse = false);
+  
   void lock()
   {
     mutex_.lock();
@@ -266,7 +254,7 @@ public:
 
   unsigned int getNumCellPoints();
 
-  std::string getFrameId()
+  inline std::string getFrameId() const
   {
     return frame_id_;
   }
@@ -276,31 +264,34 @@ public:
     last_update_stamp_ = ts;
   }
 
-  ros::Time getLastUpdateTimestamp()
+  inline ros::Time getLastUpdateTimestamp() const
   {
     return last_update_stamp_;
   }
 
   virtual void addCloudInner(PointCloudPtr cloud, bool updateOccupancy = false,
                         const Eigen::Matrix4f& origin = Eigen::Matrix4f::Identity());
-	
-	void addCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, bool updateOccupancy = false, 
+
+  virtual void addCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, bool updateOccupancy = false, 
                         const Eigen::Matrix4f& origin = Eigen::Matrix4f::Identity());
-	
-	void addCloud(pcl::PointCloud<PointXYZRGBScanLabel>::Ptr cloud, bool updateOccupancy = false, 
-                        const Eigen::Matrix4f& origin = Eigen::Matrix4f::Identity());
-	
-	void addCloud(pcl::PointCloud<PointXYZScanLine>::Ptr cloud, bool updateOccupancy = false, 
+  
+  virtual void addCloud(pcl::PointCloud<pcl::PointXYZI>::Ptr cloud, bool updateOccupancy = false, 
                         const Eigen::Matrix4f& origin = Eigen::Matrix4f::Identity());
 
-  inline pcl::PointXYZ getOdomentryIncrement(int level);
+  virtual void addCloud(pcl::PointCloud<PointXYZRGBScanLabel>::Ptr cloud, bool updateOccupancy = false, 
+                        const Eigen::Matrix4f& origin = Eigen::Matrix4f::Identity());
 
-  int getSizeInMeters()
+  virtual void addCloud(pcl::PointCloud<PointXYZScanLine>::Ptr cloud, bool updateOccupancy = false, 
+                        const Eigen::Matrix4f& origin = Eigen::Matrix4f::Identity());
+  
+  void setScanNumber(PointCloudPtr cloud){};
+  
+  int getSizeInMeters() const
   {
     return size_;
   }
 
-  int getCellCapacity()
+  int getCellCapacity() const
   {
     return cell_capacity_;
   }
@@ -320,10 +311,18 @@ public:
     return level_maps_[0]->getClampingThreshMax();
   }
 
+  unsigned int getScanNumber() const
+  {
+    return scan_number_;
+  }
+  
+  bool isEvaluated() const
+  {
+    return evaluated_;
+  }
+  
 protected:
-  void moveMap(const Eigen::Vector3f& translation);
 
-  // private:
   unsigned int size_;
   unsigned int resolution_;
   std::string frame_id_;
@@ -335,12 +334,17 @@ protected:
   std::vector<MapLevelPtr> level_maps_;
 
   boost::mutex mutex_;
+  
+  unsigned int scan_number_;
+  
+  bool evaluated_;
 };
 
-// typedef PointXYZRGBScanLabel MapPointType;
-// typedef PointXYZScanLine InputPointType;
-typedef MultiResolutionalMap<MapPointType>::GridCellType GridCellType;
-typedef boost::shared_ptr<MultiResolutionalMap<MapPointType>> MultiResolutionalMapPtr;
+//template <>
+//  inline void MultiResolutionalMap<PointXYZRGBScanLabel, mrs_laser_maps::cell_buffer<PointXYZRGBScanLabel>>::setScanNumber(pcl::PointCloud<PointXYZRGBScanLabel>::Ptr cloud);
+
+  template <>
+  inline void MultiResolutionalMap<PointXYZRGBScanLabel, boost::circular_buffer_space_optimized<PointXYZRGBScanLabel>>::setScanNumber(pcl::PointCloud<PointXYZRGBScanLabel>::Ptr cloud);
 }
 
 #include <impl/map_multiresolution.hpp>

@@ -34,42 +34,70 @@
  *
  */
 
-#ifndef _MAP_POINT_TYPES_H_
-#define _MAP_POINT_TYPES_H_
+#ifndef _SURFEL_CELL_INTERFACE_H_
+#define _SURFEL_CELL_INTERFACE_H_
 
-#define PCL_NO_PRECOMPILE
-#include <pcl/point_types.h>
-#include <pcl/point_cloud.h>
-#include <pcl/io/pcd_io.h>
+#include <ros/time.h>
 
-#include <boost/make_shared.hpp>
-#include <boost/circular_buffer_fwd.hpp>
+#include <mrs_laser_maps/surfel.h>
 
-struct PointXYZRGBScanLabel
+namespace mrs_laser_maps
 {
-  PCL_ADD_POINT4D;  // preferred way of adding a XYZ+padding
-  uint16_t scanlineNr;
-  uint16_t scanNr;
-  uint32_t pointNr;
-  EIGEN_MAKE_ALIGNED_OPERATOR_NEW  // make sure our new allocators are aligned
-} EIGEN_ALIGN16;                   // enforce SSE padding for correct memory alignment
-
-POINT_CLOUD_REGISTER_POINT_STRUCT(PointXYZRGBScanLabel,
-                                  (float, x, x)(float, y, y)(float, z, z)(uint16_t, scanlineNr, scanlineNr)
-				  (uint16_t, scanNr, scanNr)(uint32_t, pointNr, pointNr))
-
-struct PointXYZScanLine
+  
+ 
+class SurfelCellInterface
 {
-  PCL_ADD_POINT4D;  // preferred way of adding a XYZ+padding
-  uint16_t scanlineNr;
-  uint32_t pointNr;
-  EIGEN_MAKE_ALIGNED_OPERATOR_NEW  // make sure our new allocators are aligned
-} EIGEN_ALIGN16;                   // enforce SSE padding for correct memory alignment
+public:
+  
+  virtual ~SurfelCellInterface(){};
+  
+  virtual void evaluate() = 0;
+  
+  virtual const mrs_laser_maps::Surfel& getSurfel() const = 0;
 
-POINT_CLOUD_REGISTER_POINT_STRUCT(PointXYZScanLine,
-                                  (float, x, x)(float, y, y)(float, z, z)(uint16_t, scanlineNr,
-                                                                          scanlineNr)(uint32_t, pointNr, pointNr))
+};
+  
+class SurfelMapInterface
+{
+public:
+  
+  typedef std::vector<SurfelCellInterface, Eigen::aligned_allocator<SurfelCellInterface>> AlignedCellVector;
+   
+  typedef std::vector<SurfelCellInterface*> CellPtrVector;
 
+  
+  virtual ~SurfelMapInterface() {};
+  
+  virtual void evaluateAll() = 0;
 
+  virtual void unEvaluateAll() = 0;
+  
+  virtual bool isEvaluated() const = 0;
+  
+  virtual unsigned int getLevels() const = 0;
+
+  virtual double getResolution() const = 0;
+  
+  virtual double getCellSize(int level) const = 0;
+  
+  virtual double getCellSize() const = 0;
+  
+  virtual void getOccupiedCells(CellPtrVector& cells, int level) = 0;
+ 
+  virtual void getOccupiedCellsWithOffset(CellPtrVector& cells, std::vector<Eigen::Vector3f>& offsets) = 0;
+
+  virtual bool getCell(const Eigen::Vector3f& point, SurfelCellInterface*& cellPtr, Eigen::Vector3f& cellOffset, int& level) = 0;
+
+  virtual bool getCell(const Eigen::Vector3f& point, CellPtrVector& cellPtrs,
+                      std::vector<Eigen::Vector3f, Eigen::aligned_allocator<Eigen::Vector3f>>& cellOffsets,
+                      std::vector<int>& levels, int neighbors = 0, bool reverse = false) = 0;
+
+  virtual unsigned int getNumCellPoints() = 0;
+
+  virtual ros::Time getLastUpdateTimestamp() const = 0;
+protected:
+
+};    
+}
 
 #endif

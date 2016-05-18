@@ -41,6 +41,8 @@
 
 #include <fstream>
 
+#include <ros/console.h>
+   
 using namespace mrs_laser_maps;
 
 #define REGISTRATION_MIN_NUM_SURFELS 0
@@ -49,18 +51,32 @@ using namespace mrs_laser_maps;
 
 #define SOFTASSIGN 1
 
-MultiResolutionSurfelRegistration::MultiResolutionSurfelRegistration()
+MultiResolutionSurfelRegistration::MultiResolutionSurfelRegistration(const RegistrationParameters& params)
 {
   use_prior_pose_ = false;
   prior_pose_mean_ = Eigen::Matrix<double, 6, 1>::Zero();
   prior_pose_invcov_ = Eigen::Matrix<double, 6, 6>::Identity();
-  associate_once_ = true;
-  prior_prob_ = 0.9;
-  sigma_size_factor_ = 0.25;
+  
+  setRegistrationParameters(params);
+}
 
-  soft_assoc_c1_ = 1.0;
-  soft_assoc_c2_ = 8.0;
-  soft_assoc_c3_ = 1.0;
+MultiResolutionSurfelRegistration::MultiResolutionSurfelRegistration()
+: MultiResolutionSurfelRegistration(RegistrationParameters())
+{
+  
+}
+
+void MultiResolutionSurfelRegistration::setRegistrationParameters(const RegistrationParameters& params)
+{
+  associate_once_ = params.associate_once_;
+  prior_prob_ = params.prior_prob_;
+  sigma_size_factor_ = params.sigma_size_factor_ ;
+
+  soft_assoc_c1_ = params.soft_assoc_c1_;
+  soft_assoc_c2_ = params.soft_assoc_c2_;
+  soft_assoc_c3_ = params.soft_assoc_c3_;
+  
+  max_iterations_ = params.max_iterations_;
 }
 
 void MultiResolutionSurfelRegistration::setPriorPose(bool enabled, const Eigen::Matrix<double, 6, 1>& prior_pose_mean,
@@ -75,7 +91,7 @@ class AssociateFunctor
 {
 public:
   AssociateFunctor(tbb::concurrent_vector<MultiResolutionSurfelRegistration::SceneSurfelAssociation>* associations,
-                   MapType* model, MultiResolutionSurfelRegistration::CellInfoList* scene_cells,
+                   mrs_laser_maps::SurfelMapInterface* model, MultiResolutionSurfelRegistration::CellInfoList* scene_cells,
                    const Eigen::Matrix4d& transform, const double sigma, double sigma_size_factor)
   {
     associations_ = associations;
@@ -108,17 +124,17 @@ public:
 
     Eigen::Vector4d posH;
 
-    posH.block<3, 1>(0, 0) = sceneCell.offset_ + sceneCell.cell_->surfel_.mean_;
+    posH.block<3, 1>(0, 0) = sceneCell.offset_ + sceneCell.cell_->getSurfel().mean_;
     posH(3, 0) = 1.f;
 
     Eigen::Vector4d scenePointTransformedH = transform_ * posH;
     Eigen::Vector3d scenePointTransformed = scenePointTransformedH.block<3, 1>(0, 0);
 
     // TODO: volume query in map
-    //		std::vector< mrs_laser_maps::GridCellType* > matchedCells;
+    //		std::vector< mrs_laser_maps::SurfelCellInterface* > matchedCells;
     //		std::vector< Eigen::Vector3d, Eigen::aligned_allocator< Eigen::Vector3d > > matchedCellsOffsets;
 
-    std::vector<mrs_laser_maps::GridCellType*> cellPtrs;
+    std::vector<mrs_laser_maps::SurfelCellInterface*> cellPtrs;
     std::vector<int> levels;
     std::vector<Eigen::Vector3f, Eigen::aligned_allocator<Eigen::Vector3f>> cellOffsets;
 
@@ -144,22 +160,22 @@ public:
     // iterate through neighbors of the directly associated node to eventually find a better match
     for (unsigned int i = 0; i < cellPtrs.size(); i++)
     {
-      mrs_laser_maps::GridCellType* cell = cellPtrs[i];
+      mrs_laser_maps::SurfelCellInterface* cell = cellPtrs[i];
       Eigen::Vector3d cellOffsetModel = cellOffsets[i].cast<double>();
 
-      double dist2 = ((cellOffsetModel + cell->surfel_.mean_) - scenePointTransformed).squaredNorm();
+      double dist2 = ((cellOffsetModel + cell->getSurfel().mean_) - scenePointTransformed).squaredNorm();
 
       if (dist2 < dist2_threshold)
       {
         MultiResolutionSurfelRegistration::SingleAssociation singleAssoc(sceneCell.cell_, cell);
-        singleAssoc.model_mean = (cellOffsetModel + cell->surfel_.mean_);
-        singleAssoc.scene_mean = (sceneCell.offset_ + sceneCell.cell_->surfel_.mean_);
+        singleAssoc.model_mean = (cellOffsetModel + cell->getSurfel().mean_);
+        singleAssoc.scene_mean = (sceneCell.offset_ + sceneCell.cell_->getSurfel().mean_);
         singleAssoc.level = level;
         //				assoc.weight = pow( 2.0, level );
         singleAssoc.sigma = sigma;
         singleAssoc.inv_sigma2 = inv_sigma2;
         assoc.associations_.push_back(singleAssoc);
-        assoc.model_points_ += cell->surfel_.num_points_;
+        assoc.model_points_ += cell->getSurfel().num_points_;
       }
     }
 
@@ -170,7 +186,7 @@ public:
 
   tbb::concurrent_vector<MultiResolutionSurfelRegistration::SceneSurfelAssociation>* associations_;
 
-  MapType* model_;
+  mrs_laser_maps::SurfelMapInterface* model_;
 
   Eigen::Matrix4d transform_;
   Eigen::Matrix4f transformf_;
@@ -186,7 +202,7 @@ public:
 };
 
 void MultiResolutionSurfelRegistration::associateMapsBreadthFirstParallel(
-    MultiResolutionSurfelRegistration::AssociationList& surfelAssociations, MapType* model, MapType* scene,
+    MultiResolutionSurfelRegistration::AssociationList& surfelAssociations, mrs_laser_maps::SurfelMapInterface* model, mrs_laser_maps::SurfelMapInterface* scene,
     MultiResolutionSurfelRegistration::CellInfoList& sceneCells, Eigen::Matrix4d& transform, double sigma)
 {
   tbb::concurrent_vector<MultiResolutionSurfelRegistration::SceneSurfelAssociation> associations;
@@ -200,8 +216,6 @@ void MultiResolutionSurfelRegistration::associateMapsBreadthFirstParallel(
     tbb::parallel_for(tbb::blocked_range<size_t>(0, sceneCells.size(), 1000), af);
   else
     std::for_each(sceneCells.begin(), sceneCells.end(), af);
-
-  //	ROS_ERROR_STREAM( "associations.size() " << associations.size() );
 
   surfelAssociations.insert(surfelAssociations.end(), associations.begin(), associations.end());
 }
@@ -286,8 +300,8 @@ public:
       const Eigen::Vector3d mean_model = singleAssoc.model_mean;
 
       const Eigen::Matrix3d cov_scene =
-          0.0001 * mean_scene.norm() * Eigen::Matrix3d::Identity() + singleAssoc.cell_scene_->surfel_.cov_;
-      const Eigen::Matrix3d cov_model = singleAssoc.cell_model_->surfel_.cov_;
+          0.0001 * mean_scene.norm() * Eigen::Matrix3d::Identity() + singleAssoc.cell_scene_->getSurfel().cov_;
+      const Eigen::Matrix3d cov_model = singleAssoc.cell_model_->getSurfel().cov_;
 
       Eigen::Vector4d posH;
       posH.block<3, 1>(0, 0) = mean_scene;
@@ -302,8 +316,7 @@ public:
           cov_model + currentRotation * cov_scene * currentRotationT;  // + 0.001*0.001 * Eigen::Matrix3d::Identity();
       const Eigen::Matrix3d invcov = cov.inverse();
 
-      singleAssoc.error = diff.dot(invcov * diff);
-
+      singleAssoc.error = diff.dot(invcov * diff);   
       singleAssoc.z = mean_model;
       singleAssoc.f = mean_scene_transformed;
 
@@ -313,7 +326,7 @@ public:
 
 #if (SOFTASSIGN)
 
-      singleAssoc.weight = singleAssoc.cell_model_->surfel_.num_points_ * params_->soft_assoc_c1 /
+      singleAssoc.weight = singleAssoc.cell_model_->getSurfel().num_points_ * params_->soft_assoc_c1 /
                            sqrt(params_->soft_assoc_c2 * M_PI * M_PI * M_PI * cov_ps.determinant()) *
                            exp(-0.5 * diff.dot(invcov_ps * diff));
 
@@ -322,7 +335,7 @@ public:
 #endif
 
 
-      num_model_points += singleAssoc.cell_model_->surfel_.num_points_;
+      num_model_points += singleAssoc.cell_model_->getSurfel().num_points_;
       num_model_surfels += 1.0;
 
       if (derivs_)
@@ -337,7 +350,7 @@ public:
         singleAssoc.W = invcov;
       }
     }
-    const Eigen::Matrix3d cov_scene = currentRotation * assoc.cell_scene_->surfel_.cov_ * currentRotationT +
+    const Eigen::Matrix3d cov_scene = currentRotation * assoc.cell_scene_->getSurfel().cov_ * currentRotationT +
                                       sigma * sigma * Eigen::Matrix3d::Identity();
 
   
@@ -366,10 +379,13 @@ public:
           continue;
         }
         //				assoc.associations_[i].weight *= invSumWeight;
-        assoc.associations_[i].weight *= assoc.cell_scene_->surfel_.num_points_ * invSumWeight;
-        //				assoc.associations_[i].weight *= assoc.cell_scene_->surfel_.num_points_ *
-        //singleAssoc.cell_model_->surfel_.num_points_ * invSumWeight;
+        assoc.associations_[i].weight *= assoc.cell_scene_->getSurfel().num_points_ * invSumWeight;
+        //				assoc.associations_[i].weight *= assoc.cell_scene_->getSurfel().num_points_ *
+        //singleAssoc.cell_model_->getSurfel().num_points_ * invSumWeight;
         //				std::cout << invSumWeight << std::endl;
+//          if ( isnan(assoc.associations_[i].weight ) )
+//                              ROS_ERROR("assoc.associations_[i].weight   is nan");
+         
       }
     }
   }
@@ -680,10 +696,21 @@ bool MultiResolutionSurfelRegistration::registrationErrorFunctionWithFirstAndSec
 }
 
 bool MultiResolutionSurfelRegistration::estimateTransformationLevenbergMarquardt(
-    MapType* model, MapType* scene, Eigen::Matrix4d& transform,
+    mrs_laser_maps::SurfelMapInterface* model, mrs_laser_maps::SurfelMapInterface* scene, Eigen::Matrix4d& transform,
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr correspondencesSourcePoints,
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr correspondencesTargetPoints, int maxIterations)
 {
+  if ( !model->isEvaluated() )
+  {
+    ROS_ERROR("MultiResolutionSurfelRegistration::estimateTransformationLevenbergMarquardt: model map not evaluated");
+    return false;
+  }
+  if ( !scene->isEvaluated() )
+  {
+    ROS_ERROR("MultiResolutionSurfelRegistration::estimateTransformationLevenbergMarquardt: scene map not evaluated");
+    return false;
+  }  
+  
   const double tau = 10e-5;
   const double min_delta = 1e-3;
 
@@ -695,7 +722,7 @@ bool MultiResolutionSurfelRegistration::estimateTransformationLevenbergMarquardt
   MultiResolutionSurfelRegistration::RegistrationFunctionParameters params;
   params.scene = scene;
 
-  std::vector<mrs_laser_maps::GridCellType*> cells;
+  std::vector<mrs_laser_maps::SurfelCellInterface*> cells;
   std::vector<Eigen::Vector3f> offsets;
   scene->getOccupiedCellsWithOffset(cells, offsets);
 
@@ -706,7 +733,7 @@ bool MultiResolutionSurfelRegistration::estimateTransformationLevenbergMarquardt
     c.cell_ = cells[i];
     c.offset_ = offsets[i].cast<double>();
     params.scene_cells.push_back(c);
-    //		params.scene_num_points_ += cells[i]->surfel_.num_points_;
+    //		params.scene_num_points_ += cells[i]->getSurfel().num_points_;
   }
 
   params.scene_num_points_ = cells.size();
@@ -911,8 +938,8 @@ bool MultiResolutionSurfelRegistration::estimateTransformationLevenbergMarquardt
   return retVal;
 }
 
-bool MultiResolutionSurfelRegistration::estimatePoseCovariance(Eigen::Matrix<double, 6, 6>& poseCov, MapType* model,
-                                                               MapType* scene, Eigen::Matrix4d& transform)
+bool MultiResolutionSurfelRegistration::estimatePoseCovariance(Eigen::Matrix<double, 6, 6>& poseCov, mrs_laser_maps::SurfelMapInterface* model,
+                                                               mrs_laser_maps::SurfelMapInterface* scene, Eigen::Matrix4d& transform)
 {
   poseCov = last_cov_;
   return true;
@@ -948,7 +975,7 @@ Eigen::Matrix4d MultiResolutionSurfelRegistration::pose2Transform(const Eigen::M
 }
 
 bool MultiResolutionSurfelRegistration::estimatePoseCovarianceUnscented(Eigen::Matrix<double, 6, 6>& poseCov,
-                                                                        MapType* model, MapType* scene,
+                                                                        mrs_laser_maps::SurfelMapInterface* model, mrs_laser_maps::SurfelMapInterface* scene,
                                                                         Eigen::Matrix4d& transform)
 {
   poseCov.setZero();
@@ -962,7 +989,7 @@ bool MultiResolutionSurfelRegistration::estimatePoseCovarianceUnscented(Eigen::M
   MultiResolutionSurfelRegistration::RegistrationFunctionParameters params;
   params.scene = scene;
 
-  std::vector<mrs_laser_maps::GridCellType*> cells;
+  std::vector<mrs_laser_maps::SurfelCellInterface*> cells;
   std::vector<Eigen::Vector3f> offsets;
   scene->getOccupiedCellsWithOffset(cells, offsets);
 
