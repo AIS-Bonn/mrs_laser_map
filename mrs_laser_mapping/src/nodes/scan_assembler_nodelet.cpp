@@ -162,7 +162,7 @@ void ScanAssemblerNodelet::processScans()
       }
       else
       {
-        scan_projector_.transformLaserScanToPointCloud(frame_id_, scan, cloud, tf_listener_, 35.f,
+        scan_projector_.transformLaserScanToPointCloud(frame_id_, scan, cloud, tf_listener_, scan.range_max - 0.01,
         laser_geometry::channel_option::Default);
       }
 
