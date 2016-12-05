@@ -23,7 +23,6 @@ find_package(catkin REQUIRED COMPONENTS
 	cmake_modules
 	message_generation
 	config_server
-	cloud_compression
 	eigen_conversions
 	mrs_laser_maps
 )

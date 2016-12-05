@@ -46,7 +46,7 @@
 
 #include <nav_msgs/Odometry.h>
 
-#include <cloud_compression/octree_pointcloud_compression.h>
+//#include <cloud_compression/octree_pointcloud_compression.h>
 
 
 #include <mrs_laser_mapping/slam_graph.h>
@@ -116,7 +116,7 @@ private:
   
   ros::Time start_time_;
   
-  typedef cloud_compression::OctreePointCloudCompression<pcl::PointXYZRGB> Compression;
+//  typedef cloud_compression::OctreePointCloudCompression<pcl::PointXYZRGB> Compression;
 };
 }
 

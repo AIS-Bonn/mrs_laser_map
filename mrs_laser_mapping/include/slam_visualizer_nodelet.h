@@ -64,7 +64,7 @@
 
 #include <config_server/parameter.h>
 
-#include <cloud_compression/octree_pointcloud_compression.h>
+//#include <cloud_compression/octree_pointcloud_compression.h>
 
 namespace mrs_laser_mapping
 {
@@ -165,8 +165,8 @@ private:
   uint32_t run_id_;
   uint32_t key_frame_counter_;
 
-  typedef cloud_compression::OctreePointCloudCompression<PointType> Compression;
-  Compression::Ptr compression_;
+  //typedef cloud_compression::OctreePointCloudCompression<PointType> Compression;
+  //Compression::Ptr compression_;
 
   std::vector<PointCloudPtr> key_frame_clouds_;
   std::vector<PointCloudPtr> key_frame_clouds_downsampled_;

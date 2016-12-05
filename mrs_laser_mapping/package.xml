@@ -28,7 +28,6 @@
   <depend>cmake_modules</depend>
   <depend>message_generation</depend>
   <depend>config_server</depend>
-  <depend>cloud_compression</depend>
   <depend>eigen_conversions</depend>
   <depend>libg2o</depend>
   <depend>mrs_laser_maps</depend>

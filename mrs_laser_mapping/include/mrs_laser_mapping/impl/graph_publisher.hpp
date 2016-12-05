@@ -670,20 +670,20 @@ void GraphPublisher<MapPointType, MapType>::publishGraph(GraphPtr graph, bool co
     key_frame_msg.runID = run_id_;
     key_frame_msg.keyframeID = node_counter_++;
 
-    if (compress) 
-    {
-      Compression compression;
-      VectorStream stream(&key_frame_msg.compressedCloud);
-      compression.encodePointCloud(cloud_cell_points_rgb, stream);
-    }
-    else 
-    {
+//    if (compress) 
+//    {
+//      Compression compression;
+//      VectorStream stream(&key_frame_msg.compressedCloud);
+//      compression.encodePointCloud(cloud_cell_points_rgb, stream);
+//    }
+//    else 
+//    {
 //       sensor_msgs::PointCloud2 ros_cloud;
       pcl::toROSMsg(*cloud_cell_points_rgb, key_frame_msg.uncompressed_cloud);
 //     key_frame_msg->cloud.push_back(ros_cloud);
  
 //       key_frame_msg.uncompressed_cloud = ros_cloud;   
-    }
+//    }
 //   key_frame_msg.map_msg.header.stamp = last_msg->header.stamp;
 //   key_frame_msg.map_msg.header.frame_id = last_msg->header.frame_id; 
 //   key_frame_msg.map_msg.levels = last_msg->levels;

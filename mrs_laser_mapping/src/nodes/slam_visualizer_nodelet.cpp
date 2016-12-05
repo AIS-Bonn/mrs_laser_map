@@ -99,7 +99,7 @@ SlamVisualizerNodelet::SlamVisualizerNodelet()
 {
   NODELET_INFO("Initializing nodelet.. ");
 
-  compression_.reset(new Compression(pcl::io::HIGH_RES_ONLINE_COMPRESSION_WITHOUT_COLOR));
+//  compression_.reset(new Compression(pcl::io::HIGH_RES_ONLINE_COMPRESSION_WITHOUT_COLOR));
 }
 
 SlamVisualizerNodelet::~SlamVisualizerNodelet()
@@ -142,7 +142,7 @@ void SlamVisualizerNodelet::onInit()
   ph.param("filter_limit_min_z", filter_limit_min_z_, -8.f);
   ph.param("filter_limit_max_z", filter_limit_max_z_, 8.f);
   
-  ros::param::param<string>("file_name_prefix", file_name_prefix_, "visualizer");
+  ros::param::param<std::string>("file_name_prefix", file_name_prefix_, "visualizer");
 
 
   process_keyframe_thread_ = boost::shared_ptr<boost::thread>(
