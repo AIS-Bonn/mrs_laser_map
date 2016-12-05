@@ -93,8 +93,8 @@ void SlamNodelet::onInit()
 
   ros::NodeHandle& ph = getPrivateNodeHandle();
   
-  ph.param<string>("slam_frame_id", frame_id_slam_map_, "/world_corrected_slam");
-  ph.param<string>("odom_frame_id", frame_id_odometry_, "/odom");
+  ph.param<std::string>("slam_frame_id", frame_id_slam_map_, "/world_corrected_slam");
+  ph.param<std::string>("odom_frame_id", frame_id_odometry_, "/odom");
 
   
   sub_map_ = ph.subscribe("map", 1, &SlamNodelet::receivedMap, this);
@@ -136,6 +136,8 @@ void SlamNodelet::onInit()
 
 void SlamNodelet::initSLAMGraph()
 {
+  NODELET_DEBUG("SlamNodelet::initSLAMGraph()");
+
   first_map_ = true;
 
   slam_ = boost::make_shared<SlamGraph>();
@@ -222,20 +224,21 @@ void SlamNodelet::processMapQueue()
 {
   while (is_running_)
   {
-    MapType::Ptr map;
+    mrs_laser_mapping::MultiResolutionMapMsgConstPtr map_msg;
     
-    while (map_buffer_.size() > 1)
+    while (map_buffer_.size() > 1)	
     {
       NODELET_WARN_STREAM("SlamNodelet: too many messages in buffer. Dropping messages.");
-      map_buffer_.pop_back(&map);  
+      map_buffer_.pop_back(&map_msg);  
     }
-    map_buffer_.pop_back(&map);
-    update(map);
+    map_buffer_.pop_back(&map_msg);
+    update(map_msg);
   }
 }
 
-void SlamNodelet::receivedMap(const mrs_laser_mapping::MultiResolutionMapConstPtr& msg)
+void SlamNodelet::receivedMap(const mrs_laser_mapping::MultiResolutionMapMsgConstPtr& msg)
 {
+//   pcl::StopWatch watch;
   NODELET_DEBUG_STREAM("received map from timestamp " << msg->header.stamp << " at time " << ros::Time::now());
   
 //   ros::Duration map_time_diff = ros::Time::now() - msg->header.stamp;
@@ -247,25 +250,53 @@ void SlamNodelet::receivedMap(const mrs_laser_mapping::MultiResolutionMapConstPt
 //   }
 //   else if (map_time_diff.toSec() > 4.0)
 //     NODELET_WARN_STREAM("Processing old map. Latency: " << map_time_diff);
+/*
+    NODELET_INFO_STREAM("creating map with : " << msg->size_in_meters << " - " <<  msg->resolution << " " << msg->levels << " " << msg->cell_capacity << " " << msg->header.frame_id);
 
   MapType::Ptr map = boost::make_shared<MapType>(msg->size_in_meters, msg->resolution, msg->levels, msg->cell_capacity, msg->header.frame_id);
 
-  pcl::StopWatch watch_add;
-  for (unsigned int i = 0; i < msg->levels; i++)
-  {
+  tbb::parallel_for(size_t(0), static_cast<size_t>(msg->levels), size_t(1) , [=](size_t i) 
+    {  
+      
+      pcl::PointCloud<MapPointType>::Ptr points(new pcl::PointCloud<MapPointType>());
+      pcl::fromROSMsg(msg->cloud[i], *points);
+      map->setLevel(points, i);
+      
+    });
+
+//   for (unsigned int i = 0; i < msg->levels; i++)
+//   {
+//     pcl::PointCloud<MapPointType>::Ptr points(new pcl::PointCloud<MapPointType>());
+//     pcl::fromROSMsg(msg->cloud[i], *points);
+//     map->setLevel(points, i);
+//   }
+  
+  map->setLastUpdateTimestamp(msg->header.stamp);
+  map->evaluateAll();*/
+  
+  map_buffer_.push_front(msg);
+
+}
+
+void SlamNodelet::update(const mrs_laser_mapping::MultiResolutionMapMsgConstPtr& msg)
+{ 
+  pcl::StopWatch update_watch;
+  NODELET_DEBUG_STREAM("creating map with : " << msg->size_in_meters << " - " <<  msg->resolution << " " << msg->levels << " " << msg->cell_capacity << " " << msg->header.frame_id);
+  MapType::Ptr map = boost::make_shared<MapType>(msg->size_in_meters, msg->resolution, msg->levels, msg->cell_capacity, msg->header.frame_id);
+
+  bool map_distorted = msg->distorted;
+  
+  tbb::parallel_for(size_t(0), static_cast<size_t>(msg->levels), size_t(1) , [=](size_t i) 
+  {      
     pcl::PointCloud<MapPointType>::Ptr points(new pcl::PointCloud<MapPointType>());
     pcl::fromROSMsg(msg->cloud[i], *points);
     map->setLevel(points, i);
-  }
-  
+    
+  });
+
   map->setLastUpdateTimestamp(msg->header.stamp);
   map->evaluateAll();
   
-  map_buffer_.push_front(map);
-}
-
-void SlamNodelet::update(MapType::Ptr map)
-{  
   ros::Time map_time = map->getLastUpdateTimestamp();
   std::string map_frame = map->getFrameId();
   
@@ -308,10 +339,12 @@ void SlamNodelet::update(MapType::Ptr map)
   last_base_link_oriented_transform_ = world_corrected_to_blo_transform;
 
   // update the slam graph and track the pose
-  slam_->update( map );
-
+  slam_->update( map, map_distorted );
+  
+  NODELET_DEBUG_STREAM("update(): after updating slam graph: " << update_watch.getTime());
   mrs_laser_mapping::GraphPublisher<MapPointType, MapType>::getInstance()->publishGraph(slam_);
-
+  NODELET_DEBUG_STREAM("update(): after publishing graph: " << update_watch.getTime());
+  
   last_update_time_ = map_time;
 
   // get current slam pose to broadcast /world_corrected_slam
@@ -338,7 +371,8 @@ void SlamNodelet::update(MapType::Ptr map)
   odom_msg.header.stamp = map_time;
   odom_msg.header.frame_id = frame_id_slam_map_;
   tf::poseTFToMsg(base_link_in_slam_frame_transform, odom_msg.pose.pose);
-  mrs_laser_mapping::GraphPublisher<MapPointType, MapType>::getInstance()->publishOdometryGraph( slam_, odom_msg);
+//   mrs_laser_mapping::GraphPublisher<MapPointType, MapType>::getInstance()->publishOdometryGraph( slam_, odom_msg);
+  NODELET_DEBUG_STREAM("update(): end of update: " << update_watch.getTime());
 }
 
 

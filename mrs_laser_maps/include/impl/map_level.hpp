@@ -139,7 +139,7 @@ void MapLevel<PointT, BufferType>::moveMap(const Eigen::Vector3f& translation)
       for (size_t ix = 0; ix < map_.size(); ix++)
       {
         map_[map_.size() - 1][map_.size() - 1].push_back(GridCellType(cell_capacity_));
-        map_[map_.size() - 1][map_.size() - 1][map_.size() - 1].getPoints()->clear();
+        map_[map_.size() - 1][map_.size() - 1][map_.size() - 1].clearCell();
       }
     }
   }
@@ -161,7 +161,7 @@ void MapLevel<PointT, BufferType>::moveMap(const Eigen::Vector3f& translation)
       for (size_t ix = 0; ix < map_.size(); ix++)
       {
         map_[0][map_.size() - 1].push_back(GridCellType(cell_capacity_));
-        map_[0][map_.size() - 1][map_.size() - 1].getPoints()->clear();
+        map_[0][map_.size() - 1][map_.size() - 1].clearCell();
         // 				retainPoints( 0, map_.size()-1, map_.size()-1);
       }
     }
@@ -182,7 +182,7 @@ void MapLevel<PointT, BufferType>::moveMap(const Eigen::Vector3f& translation)
       for (size_t ix = 0; ix < map_.size(); ix++)
       {
         map_[iz][map_.size() - 1].push_back(GridCellType(cell_capacity_));
-        map_[iz][map_.size() - 1][map_.size() - 1].getPoints()->clear();
+        map_[iz][map_.size() - 1][map_.size() - 1].clearCell();
         // 				retainPoints( iz, map_.size()-1 , map_.size()-1);
       }
     }
@@ -193,7 +193,7 @@ void MapLevel<PointT, BufferType>::moveMap(const Eigen::Vector3f& translation)
       for (size_t ix = 0; ix < map_.size(); ix++)
       {
         map_[iz][0].push_back(GridCellType(cell_capacity_));
-        map_[iz][0][map_.size() - 1].getPoints()->clear();
+        map_[iz][0][map_.size() - 1].clearCell();
         // 				retainPoints( iz, 0 , map_.size()-1);
       }
     }
@@ -218,14 +218,14 @@ void MapLevel<PointT, BufferType>::moveMap(const Eigen::Vector3f& translation)
       for (int ix = 0; ix < mx; ix++)
       {
         map_[iz][iy].push_back(GridCellType(cell_capacity_));
-        map_[iz][iy][map_.size() - 1].getPoints()->clear();
+        map_[iz][iy][map_.size() - 1].clearCell();
         // 				retainPoints( iz, iy, map_.size()-1 );
       }
       for (int ix = mx; ix < 0; ix++)
       {
         assert(map_[iz][iy].size() == map_.size());
         map_[iz][iy].push_front(GridCellType(cell_capacity_));
-        map_[iz][iy][0].getPoints()->clear();
+        map_[iz][iy][0].clearCell();
         assert(map_[iz][iy].size() == map_.size());
         // 				retainPoints( iz, iy, 0 );
       }
@@ -261,9 +261,9 @@ inline bool MapLevel<PointT, BufferType>::calcIndices(const Eigen::Vector3f& p, 
   float fy = resolution_ * p(1) + mid_point;
   float fz = resolution_ * p(2) + mid_point;
 
-  x = resolution_ * p(0) + mid_point;
-  y = resolution_ * p(1) + mid_point;
-  z = resolution_ * p(2) + mid_point;
+  x = static_cast<int>(fx);
+  y = static_cast<int>(fy);
+  z = static_cast<int>(fz);
 
   bool valid = fx >= 0.f && fy >= 0.f && fz >= 0.f;
   valid = valid && x >= 0 && y >= 0 && z >= 0;
@@ -275,7 +275,7 @@ inline bool MapLevel<PointT, BufferType>::calcIndices(const Eigen::Vector3f& p, 
 template <typename PointT, typename BufferType>
 void MapLevel<PointT, BufferType>::translateMap(const Eigen::Vector3f& translation)
 {
-  if (isnan(translation(0)) || isnan(translation(1)) || isnan(translation(2)))
+  if (std::isnan(translation(0)) || std::isnan(translation(1)) || std::isnan(translation(2)))
     return;
 
   translation_increment_.x += translation(0);
@@ -338,9 +338,18 @@ void MapLevel<PointT, BufferType>::decreaseAll(float decrease_rate)
   }
 }
 
+
+
+
+
+
 template <typename PointT, typename BufferType>
 void MapLevel<PointT, BufferType>::evaluateAll()
-{
+{ 
+#ifdef PARALLEL
+  mrs_laser_maps::MapLevel<PointT, BufferType>::EvaluateFunctor eval_func(&map_, false, 0); 
+  tbb::parallel_for( tbb::blocked_range3d<int>(0, map_.size(), 0, map_.size(), 0, map_.size()), eval_func);
+#else 
   for (size_t iz = 0; iz < map_.size(); iz++)
   {
     for (size_t iy = 0; iy < map_[iz].size(); iy++)
@@ -352,11 +361,16 @@ void MapLevel<PointT, BufferType>::evaluateAll()
       }
     }
   }
+#endif
 }
 
 template <typename PointT, typename BufferType>
-void MapLevel<PointT, BufferType>::evaluateAll ( unsigned int skipScan )
+void MapLevel<PointT, BufferType>::evaluateAll ( unsigned int skip_scan )
 {
+#ifdef PARALLEL
+  mrs_laser_maps::MapLevel<PointT, BufferType>::EvaluateFunctor eval_func(&map_, true, skip_scan);
+  tbb::parallel_for( tbb::blocked_range3d<int>(0, map_.size(), 0, map_.size(), 0, map_.size()), eval_func);
+#else 
   for( size_t iz = 0; iz < map_.size(); iz++ ) 
   {
     for( size_t iy = 0; iy < map_[ iz ].size(); iy++ ) 
@@ -364,13 +378,24 @@ void MapLevel<PointT, BufferType>::evaluateAll ( unsigned int skipScan )
       for( size_t ix = 0; ix < map_[ iz ][ iy ].size(); ix++ ) 
       {
 	map_[ iz ][ iy ][ ix ].surfel_.clear();
-	map_[ iz ][ iy ][ ix ].evaluate(skipScan);
+	map_[ iz ][ iy ][ ix ].evaluate(skip_scan);
       }
     }
   }
+#endif
 }
 
 
+template <typename PointT, typename BufferType>
+void MapLevel<PointT, BufferType>::evaluateAll ( const std::vector<unsigned int>& labels )
+{
+#ifdef PARALLEL
+  mrs_laser_maps::MapLevel<PointT, BufferType>::EvaluateLabelListFunctor eval_func(&map_, labels);
+  tbb::parallel_for( tbb::blocked_range3d<int>(0, map_.size(), 0, map_.size(), 0, map_.size()), eval_func);
+#else
+  ROS_ERROR("evaluateAll ( const std::vector<unsigned int>& labels ) not implementd");
+#endif
+}
 
 template <typename PointT, typename BufferType>
 void MapLevel<PointT, BufferType>::unEvaluateAll()
@@ -498,7 +523,7 @@ inline int MapLevel<PointT, BufferType>::getLocalCell(const pcl::PointXYZ& point
 template <typename PointT, typename BufferType>
 void MapLevel<PointT, BufferType>::getOccupiedCells(std::vector<pcl::PointXYZ>& cells, bool omit_center )
 {
-  cells.clear();
+//   cells.clear();
 
   for (size_t iz = 0; iz < map_.size(); iz++)
   {
@@ -692,6 +717,16 @@ bool MapLevel<PointT, BufferType>::inCenter(int x, int y, int z)
 template <typename PointT, typename BufferType>
 void MapLevel<PointT, BufferType>::getCellPoints(PointCloudPtr points, bool omit_center)
 {
+#ifdef PARALLEL
+  boost::shared_ptr<tbb::concurrent_vector<PointCloudPtr>> result_clouds = boost::make_shared<tbb::concurrent_vector<PointCloudPtr>>();
+  mrs_laser_maps::MapLevel<PointT, BufferType>::GetCellPointsFunctor func(&map_, this, result_clouds, omit_center);
+  
+  tbb::parallel_for( tbb::blocked_range3d<int>(0, map_.size(), 0, map_.size(), 0, map_.size()), func);
+  for (auto rc : *result_clouds )
+  {
+    points->points.insert(points->points.end(), rc->points.begin(), rc->points.end());
+  }
+#else
   for (size_t iz = 0; iz < map_.size(); iz++)
   {
     for (size_t iy = 0; iy < map_[iz].size(); iy++)
@@ -714,10 +749,13 @@ void MapLevel<PointT, BufferType>::getCellPoints(PointCloudPtr points, bool omit
           // transform back to map frame
           cellToMapFrame(*it, p, ix, iy, iz);
           points->push_back(p);
+	  
         }
       }
     }
   }
+#endif
+
 }
 
 template <typename PointT, typename BufferType>
@@ -729,14 +767,14 @@ void MapLevel<PointT, BufferType>::getCellPointsByScanLabel(PointCloudPtr points
     {
       for (size_t ix = 0; ix < map_[iz][iy].size(); ix++)
       {
-        if (omit_center && inCenter(ix, iy, iz))
-          continue;
-
-        if (map_[iz][iy][ix].getOccupancy() <= OCCUPANCY_UNKNOWN)
-        {
-          map_[iz][iy][ix].getPoints()->clear();
-          continue;
-        }
+//         if (omit_center && inCenter(ix, iy, iz))
+//           continue;
+// 
+//         if (map_[iz][iy][ix].getOccupancy() <= OCCUPANCY_UNKNOWN)
+//         {
+//           map_[iz][iy][ix].getPoints()->clear();
+//           continue;
+//         }
         CircularBufferPtr cell_points = map_[iz][iy][ix].getPoints();
 	
 //         std::vector<unsigned int> labels_for_scan;
@@ -769,7 +807,7 @@ void MapLevel<PointT, BufferType>::getCellPointsByScanLabel(PointCloudPtr points
 }
 
 template <typename PointT, typename BufferType>
-void MapLevel<PointT, BufferType>::deleteCellPointsByScanLabel(PointCloudPtr points, unsigned int scan_id, bool omit_center)
+void MapLevel<PointT, BufferType>::getCellPointsByScanLabel(PointCloudPtr points, unsigned int scan_id, PointByIdMap& point_map, bool omit_center)
 {
   for (size_t iz = 0; iz < map_.size(); iz++)
   {
@@ -777,9 +815,56 @@ void MapLevel<PointT, BufferType>::deleteCellPointsByScanLabel(PointCloudPtr poi
     {
       for (size_t ix = 0; ix < map_[iz][iy].size(); ix++)
       {
-        if (omit_center && inCenter(ix, iy, iz))
-          continue;
+//         if (omit_center && inCenter(ix, iy, iz))
+//           continue;
+// 
+//         if (map_[iz][iy][ix].getOccupancy() <= OCCUPANCY_UNKNOWN)
+//         {
+//           map_[iz][iy][ix].getPoints()->clear();
+//           continue;
+//         }
+        CircularBufferPtr cell_points = map_[iz][iy][ix].getPoints();
+	
+//         std::vector<unsigned int> labels_for_scan;
+// 	cell_points->find_scan_id(scan_id, labels_for_scan);
+// 	for (auto const &point_label: labels_for_scan)
+// 	{
+// 	  PointT p;
+// 	  map_[iz][iy][ix].getPointByLabel(point_label, p);
+// 	
+// 	  PointT map_point = p; 
+// 	  cellToMapFrame(p, map_point, ix, iy, iz);
+//           points->push_back(map_point);
+// 
+// 	}
+	for (CircularBufferIterator it = cell_points->begin(); it != cell_points->end(); it++)
+        {
+          if ((*it).scanNr == scan_id)
+          {
+            PointT p = (*it);
+            // transform back to map frame
+            cellToMapFrame(*it, p, ix, iy, iz);
+            points->push_back(p);
+	    
+	    point_map[(*it).pointNr] = it;
 
+          }
+        }
+      }
+    }
+  }
+}
+
+
+template <typename PointT, typename BufferType>
+void MapLevel<PointT, BufferType>::deleteCellPointsByScanLabel(PointCloudPtr points, unsigned int scan_id)
+{
+  for (size_t iz = 0; iz < map_.size(); iz++)
+  {
+    for (size_t iy = 0; iy < map_[iz].size(); iy++)
+    {
+      for (size_t ix = 0; ix < map_[iz][iy].size(); ix++)
+      {
         if (map_[iz][iy][ix].getOccupancy() <= OCCUPANCY_UNKNOWN)
         {
           map_[iz][iy][ix].getPoints()->clear();
@@ -807,6 +892,94 @@ void MapLevel<PointT, BufferType>::deleteCellPointsByScanLabel(PointCloudPtr poi
   }
 }
 
+
+template <typename PointT, typename BufferType>
+void MapLevel<PointT, BufferType>::deleteCellPointsByScanLabel(unsigned int scan_id)
+{
+#ifdef PARALLEL
+  mrs_laser_maps::MapLevel<PointT, BufferType>::DeleteByScanLabelFunctor delete_func(&map_, scan_id);
+  tbb::parallel_for( tbb::blocked_range3d<int>(0, map_.size(), 0, map_.size(), 0, map_.size()), delete_func);
+//   ROS_INFO("calling parallel deleteCellPointsByScanLabel");
+#else
+  for (size_t iz = 0; iz < map_.size(); iz++)
+  {
+    for (size_t iy = 0; iy < map_[iz].size(); iy++)
+    {
+      for (size_t ix = 0; ix < map_[iz][iy].size(); ix++)
+      {
+        if (map_[iz][iy][ix].getOccupancy() <= OCCUPANCY_UNKNOWN)
+        {
+          map_[iz][iy][ix].getPoints()->clear();
+          continue;
+        }
+        CircularBufferPtr cell_points = map_[iz][iy][ix].getPoints();
+        CircularBufferIterator it = cell_points->begin();
+	while ( it != cell_points->end())
+        {
+          if ((*it).scanNr == scan_id)
+          {
+            it = cell_points->erase(it);
+          }
+          else
+          {
+            ++it;
+          }
+        }
+        if (cell_points->size() == 0)
+	{
+	  map_[iz][iy][ix].clearCell();
+	}
+      }
+    }
+  }
+//   ROS_INFO("calling serial deleteCellPointsByScanLabel");
+#endif
+  
+  
+}
+
+template <typename PointT, typename BufferType>
+void MapLevel<PointT, BufferType>::deleteCellPointsByPointLabel(const std::vector<uint32_t>& point_ids)
+{  
+  for (size_t iz = 0; iz < map_.size(); iz++)
+  {
+    for (size_t iy = 0; iy < map_[iz].size(); iy++)
+    {
+      for (size_t ix = 0; ix < map_[iz][iy].size(); ix++)
+      {
+        CircularBufferPtr cell_points = map_[iz][iy][ix].getPoints();
+	{
+	  for (const auto& id : point_ids)
+	  {
+	    if (cell_points->empty())
+	      continue;
+
+// 	    if ( id > cell_points->front().pointNr )
+// 	      continue;
+// 	    
+// 	    if ( id < cell_points->back().pointNr )
+// 	      continue;
+// 	    
+	    CircularBufferIterator it = cell_points->begin();
+	    while ( it != cell_points->end())
+	    {
+	  
+	      if ((*it).pointNr == id)
+	      {
+		it = cell_points->erase(it);
+		break;
+	      }
+	      else
+	      {
+		++it;
+	      }
+	    }
+	  }
+        }
+      }
+    }
+  }
+}
 template <typename PointT, typename BufferType>
 void MapLevel<PointT, BufferType>::getCellPointsByScanLabel(PointCloudPtr points, unsigned int scan_id, unsigned int scan_line_id,
                                                 bool omitCenter)
@@ -817,14 +990,14 @@ void MapLevel<PointT, BufferType>::getCellPointsByScanLabel(PointCloudPtr points
     {
       for (size_t ix = 0; ix < map_[iz][iy].size(); ix++)
       {
-        if (omitCenter && inCenter(ix, iy, iz))
-          continue;
+//         if (omitCenter && inCenter(ix, iy, iz))
+//           continue;
 
-        if (map_[iz][iy][ix].getOccupancy() <= OCCUPANCY_UNKNOWN)
-        {
-          map_[iz][iy][ix].getPoints()->clear();
-          continue;
-        }
+//         if (map_[iz][iy][ix].getOccupancy() <= OCCUPANCY_UNKNOWN)
+//         {
+//           map_[iz][iy][ix].getPoints()->clear();
+//           continue;
+//         }
         CircularBufferPtr cell_points = map_[iz][iy][ix].getPoints();
         for (CircularBufferIterator it = cell_points->begin(); it != cell_points->end(); it++)
         {
@@ -880,6 +1053,7 @@ void MapLevel<PointT, BufferType>::deleteCellPointsByScanLabel(PointCloudPtr poi
     }
   }
 }
+
 
 template <typename PointT, typename BufferType>
 unsigned int MapLevel<PointT, BufferType>::getNumCellPoints()
@@ -1033,7 +1207,7 @@ bool MapLevel<PointT, BufferType>::insertRay(const PointT& p, const Eigen::Matri
   p_origin(1) += translation_increment_.y;
   p_origin(2) += translation_increment_.z;
 
-  if (isnan(p.x) || isnan(p.y) || isnan(p.z))
+  if (std::isnan(p.x) || std::isnan(p.y) || std::isnan(p.z))
     return false;
 
   Eigen::Vector3f direction = (p_map.getVector3fMap() - p_origin);
@@ -1198,7 +1372,7 @@ bool MapLevel<PointT, BufferType>::insertRay(const PointT& p, const Eigen::Matri
           if (!(*current_cell_ptr).is_end_point_)
           {
 	    // check if the ray intersects the surfel  
-	    if ( (*current_cell_ptr).surfel_.num_points_ > MIN_SURFEL_POINTS && (*current_cell_ptr).surfel_.evaluated_ )
+	    if ( (*current_cell_ptr).surfel_.num_points_ > 100 && (*current_cell_ptr).surfel_.evaluated_ )
 	    {
 	      Eigen::Matrix<double, 3, 1> mean = (*current_cell_ptr).surfel_.mean_;
 	   
@@ -1216,7 +1390,7 @@ bool MapLevel<PointT, BufferType>::insertRay(const PointT& p, const Eigen::Matri
 	      
 	      double dist = sqrt((direction_scaled - surfel_mean_in_map).transpose() * (*current_cell_ptr).surfel_.invcov_ * (direction_scaled - surfel_mean_in_map));
 	      
- 	      if ( dist < 1.0 )
+ 	      if ( dist < 0.8 )
 	      {
 		(*current_cell_ptr).addOccupancy(prob_miss_);	      
 	      }
@@ -1226,13 +1400,13 @@ bool MapLevel<PointT, BufferType>::insertRay(const PointT& p, const Eigen::Matri
 	      (*current_cell_ptr).addOccupancy(prob_miss_);
 	    }
 	    
-            if ((*current_cell_ptr).getOccupancy() < clamping_thresh_min_)
-            {
-              (*current_cell_ptr).setOccupancy(clamping_thresh_min_);
-
-              (*current_cell_ptr).getPoints()->clear();
-              (*current_cell_ptr).debug_state_ = GridCellType::FREE;
-            }
+//             if ((*current_cell_ptr).getOccupancy() < clamping_thresh_min_)
+//             {
+//               (*current_cell_ptr).setOccupancy(clamping_thresh_min_);
+// 	      
+//               (*current_cell_ptr).getPoints()->clear();
+//               (*current_cell_ptr).debug_state_ = GridCellType::FREE;
+//             }
           }
         }
       }
@@ -1245,6 +1419,27 @@ bool MapLevel<PointT, BufferType>::insertRay(const PointT& p, const Eigen::Matri
   } 
 
   return endpoint_in_map;
+}
+
+template <typename PointT, typename BufferType>
+void MapLevel<PointT, BufferType>::clearCellsByOccupancy(std::vector<PointT>& deleted_points)
+{
+  for (size_t iz = 0; iz < map_.size(); iz++)
+  {
+    for (size_t iy = 0; iy < map_[iz].size(); iy++)
+    {
+      for (size_t ix = 0; ix < map_[iz][iy].size(); ix++)
+      {
+	if (map_[iz][iy][ix].getOccupancy() < clamping_thresh_min_)
+	{
+	  map_[iz][iy][ix].setOccupancy(clamping_thresh_min_);
+	  deleted_points.insert(deleted_points.begin(), map_[iz][iy][ix].getPoints()->begin(), map_[iz][iy][ix].getPoints()->end());
+	  map_[iz][iy][ix].getPoints()->clear();
+	  map_[iz][iy][ix].debug_state_ = GridCellType::FREE;
+	}
+      }
+    }
+  }
 }
 
 template <typename PointT, typename BufferType>
@@ -1340,12 +1535,13 @@ void MapLevel<PointT, BufferType>::setConicalUpdateMask(const Eigen::Vector3f& p
 template <typename PointT, typename BufferType>
 void MapLevel<PointT, BufferType>::retainPoints(int iz, int iy, int ix)
 {
+  
   if (coarser_level_)
   {
     Eigen::Vector3f point_in_world;
-    point_in_world(0) = ((float)ix / resolution_ - (size_ / 2.f));
-    point_in_world(1) = ((float)iy / resolution_ - (size_ / 2.f));
-    point_in_world(2) = ((float)iz / resolution_ - (size_ / 2.f));
+    point_in_world(0) = ((float)ix / resolution_ - (size_ / 2.f))+0.1f;
+    point_in_world(1) = ((float)iy / resolution_ - (size_ / 2.f))+0.1f;
+    point_in_world(2) = ((float)iz / resolution_ - (size_ / 2.f))+0.1f;
 
     point_in_world(0) -= translation_increment_.x;
     point_in_world(1) -= translation_increment_.y;
@@ -1422,7 +1618,7 @@ void MapLevel<PointT, BufferType>::setAllEndPointFlags(bool end_point)
 template <typename PointT, typename BufferType>
 void MapLevel<PointT, BufferType>::setEndPointFlag(const PointT& point, const Eigen::Matrix4f& sensor_transform)
 {
-  if (isnan(point.x) || isnan(point.y) || isnan(point.z))
+  if (std::isnan(point.x) || std::isnan(point.y) || std::isnan(point.z))
     return;
 
   GridCellType* endpoint_cell_ptr;
@@ -1455,15 +1651,10 @@ bool MapLevel<PointT, BufferType>::toCellCoordinate(const PointT& point, PointT&
   if (calcIndices(point_in_map_coords, x, y, z))
   {
     // transform point to grid cell's frame
-    point_in_cell_coords.x = fmodf(point_in_map_coords.x, (1.f / resolution_));
-    if (point_in_cell_coords.x < 0.f)
-      point_in_cell_coords.x += (1.f / resolution_);
-    point_in_cell_coords.y = fmodf(point_in_map_coords.y, (1.f / resolution_));
-    if (point_in_cell_coords.y < 0.f)
-      point_in_cell_coords.y += (1.f / resolution_);
-    point_in_cell_coords.z = fmodf(point_in_map_coords.z, (1.f / resolution_));
-    if (point_in_cell_coords.z < 0.f)
-      point_in_cell_coords.z += (1.f / resolution_);
+    point_in_cell_coords.x = point_in_map_coords.x - (x / resolution_ - (size_ / 2.f));
+    point_in_cell_coords.y = point_in_map_coords.y - (y / resolution_ - (size_ / 2.f));
+    point_in_cell_coords.z = point_in_map_coords.z - (z / resolution_ - (size_ / 2.f));
+ 
     return true;
   }
   else
@@ -1498,7 +1689,7 @@ void MapLevel<PointT, BufferType>::cellToMapFrame(Eigen::Vector3f& point_in_map,
   point_in_map(2) -= translation_increment_.z;
 }
 
-#ifdef DEBUG_CELL_HITS  
+#ifdef DEBUG_CELL_HITS
 template <typename PointT, typename BufferType>
 void MapLevel<PointT, BufferType>::printCellDebugInfo()
 {

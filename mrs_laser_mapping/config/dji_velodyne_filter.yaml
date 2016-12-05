@@ -1,0 +1,21 @@
+cloud_filter_chain:
+- type: ais_laser_filters/PointCloudFootprintFilter
+  name: footprint_filter
+  params:
+    filter_min_x: -0.9
+    filter_max_x: 0.9
+    filter_min_y: -0.9
+    filter_max_y: 0.9
+    filter_min_z: -0.5
+    filter_max_z: 0.5
+#- type: ais_laser_filters/PointCloudFootprintFilter
+  #name: footprint_filter
+  #params:
+    #filter_min_x: -0.5
+    #filter_max_x: 0.6
+    #filter_min_y: -0.4
+    #filter_max_y: 0.5
+    #filter_min_z: -0.5
+    #filter_max_z: 0.5
+    
+    

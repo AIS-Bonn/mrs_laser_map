@@ -1,0 +1,43 @@
+<package>
+  <name>ais_laser_filters</name>
+  <description>
+    Assorted filters designed to operate on 2D planar laser scanners and point clouds.
+  </description>
+  <version>1.7.2</version>
+  <maintainer email="nieuwenh@ais.uni-bonn.de">Matthias Nieuwenhuisen</maintainer>
+  <maintainer email="droeschel@ais.uni-bonn.de">David Droeschel</maintainer>
+ 
+  <license>BSD</license>
+  
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <build_depend>cmake_modules</build_depend>
+  <build_depend>sensor_msgs</build_depend>
+  <build_depend>roscpp</build_depend>
+  <build_depend>pluginlib</build_depend>
+  <build_depend>angles</build_depend>
+  <build_depend>tf</build_depend>
+  <build_depend>laser_geometry</build_depend>
+  <build_depend>eigen_conversions</build_depend>
+  <build_depend>pcl_ros</build_depend>
+  <build_depend>tf_conversions</build_depend>
+
+
+  <run_depend>cmake_modules</run_depend>
+  <run_depend>sensor_msgs</run_depend>
+  <run_depend>roscpp</run_depend>
+  <run_depend>tf</run_depend>
+  <run_depend>filters</run_depend>
+  <run_depend>message_filters</run_depend>
+  <run_depend>pluginlib</run_depend>
+  <run_depend>angles</run_depend>
+  <run_depend>laser_geometry</run_depend>
+  <run_depend>eigen_conversions</run_depend>
+  <run_depend>pcl_ros</run_depend>
+  <run_depend>tf_conversions</run_depend>
+
+  <export>
+    <cpp cflags="-I${prefix}/include `rosboost-cfg --cflags`" lflags=""/>
+    <filters plugin="${prefix}/laser_filters_plugins.xml"/>
+  </export>
+</package>

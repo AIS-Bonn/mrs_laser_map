@@ -39,6 +39,12 @@
 
 #include <mrs_laser_maps/map_multiresolution.h>
 
+#define TBB_PREVIEW_TASK_ARENA 1
+
+#include <tbb/tbb.h>
+#include <tbb/blocked_range3d.h>
+#include "tbb/task_arena.h"
+
 namespace mrs_laser_maps
 {
 template <typename MapPointType, typename BufferType>
@@ -79,7 +85,7 @@ MultiResolutionalMap<MapPointType, BufferType>::MultiResolutionalMap(const Multi
    , scan_number_(map.getScanNumber())
    , evaluated_(map.isEvaluated())
 {
-  for ( auto level: map.level_maps_)
+  for ( const auto& level: map.level_maps_)
     level_maps_.push_back(boost::make_shared<MapLevel<MapPointType>>(*level.get())); 
 
   for (int i = 1; i < level_maps_.size() ; i++)
@@ -114,6 +120,42 @@ void MultiResolutionalMap<MapPointType, BufferType>::set(const MapPointType& p, 
     if (!level->set(p, update_occupancy))
       break;
   }
+  evaluated_ = false;
+}
+
+template <typename MapPointType, typename BufferType>
+void MultiResolutionalMap<MapPointType, BufferType>::insertRay(const MapPointType& p, const Eigen::Matrix4f& origin)
+{
+  for (auto& level : boost::adaptors::reverse(level_maps_) )
+  {
+    level->insertRay(p, origin);
+  }
+  evaluated_ = false;
+}
+
+template <typename MapPointType, typename BufferType>
+void MultiResolutionalMap<MapPointType, BufferType>::insertRay(const PointCloudPtr& cloud, const Eigen::Matrix4f& origin)
+{
+  
+#ifdef PARALLEL
+  tbb::parallel_for( size_t(0), level_maps_.size(),
+    [=]( const size_t i ) 
+    {
+      for (size_t j = 0; j < cloud->points.size(); j++)	
+      {
+	level_maps_[i]->insertRay(cloud->points[j], origin);
+      }
+    });
+#else
+  for (auto& level : boost::adaptors::reverse(level_maps_) )
+  {
+    for (size_t j = 0; j < cloud->points.size(); j++)
+    {
+
+      level->insertRay(cloud->points[j], origin);
+    }
+  }
+#endif
   evaluated_ = false;
 }
 
@@ -257,32 +299,32 @@ unsigned int MultiResolutionalMap<MapPointType, BufferType>::getNumCellPoints()
 }
 
 template <typename MapPointType, typename BufferType>
-bool MultiResolutionalMap<MapPointType, BufferType>::getCell(const Eigen::Vector3f& point, mrs_laser_maps::SurfelMapInterface::CellPtrVector& cellPtrs,
-                      std::vector<Eigen::Vector3f, Eigen::aligned_allocator<Eigen::Vector3f>>& cellOffsets,
+bool MultiResolutionalMap<MapPointType, BufferType>::getCell(const Eigen::Vector3f& point, mrs_laser_maps::SurfelMapInterface::CellPtrVector& cell_ptrs,
+                      std::vector<Eigen::Vector3f, Eigen::aligned_allocator<Eigen::Vector3f>>& cell_offsets,
                       std::vector<int>& levels, int neighbors, bool reverse)
+{
+  if (reverse)
   {
-    if (reverse)
+    for (int i = level_maps_.size() - 1; i >= 0; --i)
     {
-      for (int i = level_maps_.size() - 1; i >= 0; --i)
+      if (level_maps_[i]->getCell(point, cell_ptrs, cell_offsets, levels, i, neighbors))
       {
-        if (level_maps_[i]->getCell(point, cellPtrs, cellOffsets, levels, i, neighbors))
-        {
-          return true;
-        }
+	return true;
       }
     }
-    else
-    {
-      for (unsigned int i = 0; i < level_maps_.size(); i++)
-      {
-        if (level_maps_[i]->getCell(point, cellPtrs, cellOffsets, levels, i, neighbors))
-        {
-          return true;
-        }
-      }
-    }
-    return false;
   }
+  else
+  {
+    for (unsigned int i = 0; i < level_maps_.size(); i++)
+    {
+      if (level_maps_[i]->getCell(point, cell_ptrs, cell_offsets, levels, i, neighbors))
+      {
+	return true;
+      }
+    }
+  }
+  return false;
+}
 
 template <typename MapPointType, typename BufferType>
 void MultiResolutionalMap<MapPointType, BufferType>::addCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, bool updateOccupancy, const Eigen::Matrix4f& origin)
@@ -332,7 +374,9 @@ void MultiResolutionalMap<PointXYZRGBScanLabel, boost::circular_buffer_space_opt
   for (auto& point : cloud->points)
   {
     point.scanNr = scan_number_;
+    point.distance = point.getVector3fMap().norm();
   }
+  
   scan_number_++;
 }
 
@@ -340,13 +384,16 @@ template <typename MapPointType, typename BufferType>
 void MultiResolutionalMap<MapPointType, BufferType>::addCloudInner(PointCloudPtr cloud, bool update_occupancy, const Eigen::Matrix4f& origin)
 {
   ROS_DEBUG_STREAM_NAMED("map", "addCloudInner with scan_number_: " << scan_number_);
+  pcl::StopWatch watch; 
   
   boost::mutex::scoped_lock lock(mutex_);
 
   setScanNumber(cloud);
+  ROS_DEBUG_STREAM_NAMED("map", "addCloudInner  after: setScanNumber: " << watch.getTime());
   
   // unmark all endpoints
   setAllEndPointFlags(false);
+  ROS_DEBUG_STREAM_NAMED("map", "addCloudInner  after: setAllEndPointFlags: " << watch.getTime());
   
   // mark endpoints
   if (update_occupancy)
@@ -356,14 +403,38 @@ void MultiResolutionalMap<MapPointType, BufferType>::addCloudInner(PointCloudPtr
       setEndPointFlag(cloud->points[i], origin);
     }
   }
+  ROS_DEBUG_STREAM_NAMED("map", "addCloudInner  after: setEndPointFlag: "  << watch.getTime());
 
-  for (size_t i = 0; i < cloud->points.size(); i++)
+  if (update_occupancy)
   {
-    if (update_occupancy)
-      insertRay(cloud->points[i], origin);
-    else
-      set(cloud->points[i]);
+      insertRay(cloud, origin);
+      ROS_DEBUG_STREAM_NAMED("map", "addCloudInner  after: insertRay: "  << watch.getTime());
+      std::vector<MapPointType> deleted_points;
+      for (MapLevelPtr l : level_maps_)
+      {
+	l->clearCellsByOccupancy(deleted_points);
+      }
+      
   }
+  else
+  {
+#ifdef PARALLEL
+    tbb::parallel_for( size_t(0), level_maps_.size(),
+    [=]( const size_t i ) 
+    {
+      
+      setLevel(cloud, i);
+  
+    });  
+#else
+    for (size_t i = 0; i < cloud->points.size(); i++)
+    {
+      set(cloud->points[i]);
+    }
+#endif
+    ROS_DEBUG_STREAM_NAMED("map", "addCloudInner  after: set: "  << watch.getTime());
+  }
+  
 
 #ifdef DEBUG_CELL_HITS  
   for (MapLevelPtr l : level_maps_)
@@ -409,6 +480,7 @@ void MultiResolutionalMap<MapPointType, BufferType>::setOccupancyParameters(floa
 template <typename MapPointType, typename BufferType>
 void MultiResolutionalMap<MapPointType, BufferType>::evaluateAll()
 {
+  pcl::StopWatch watch;
   if (evaluated_ == true)
   {
     ROS_INFO("calling evaluate all but map is already evaluated");
@@ -419,6 +491,7 @@ void MultiResolutionalMap<MapPointType, BufferType>::evaluateAll()
     level->evaluateAll();
   }
   evaluated_ = true;
+  ROS_DEBUG_STREAM_NAMED("map", "evaluate took: " << watch.getTime() << " ms " << watch.getTimeSeconds()  );
 }
 
 template <typename MapPointType, typename BufferType>

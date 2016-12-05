@@ -1,0 +1,2 @@
+- git: {local-name: mrs_laser_map, uri: git@git.ais.uni-bonn.de:droeschel/mrs_laser_map.git}
+- git: {local-name: nimbro_config_server,  uri: git@git.ais.uni-bonn.de:nimbroshared/nimbro_config_server}

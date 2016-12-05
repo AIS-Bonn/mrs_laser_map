@@ -9,3 +9,6 @@ uint32 keyframeID
 
 # Compressed point cloud
 uint8[] compressedCloud
+
+# Uncompressed point cloud
+sensor_msgs/PointCloud2 uncompressed_cloud

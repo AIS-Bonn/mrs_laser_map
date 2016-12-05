@@ -64,7 +64,7 @@
 #include <mrs_laser_maps/map_point_types.h>
 
 #include <std_srvs/Empty.h>
-#include <mrs_laser_mapping/MultiResolutionMap.h>
+#include <mrs_laser_mapping/MultiResolutionMapMsg.h>
 #include <mrs_laser_mapping/AddKeyFramesByDistance.h>
 
 
@@ -90,8 +90,8 @@ public:
   bool resendKeyframesServiceCall(std_srvs::Empty::Request& req, std_srvs::Empty::Response& res);
 
   void processMapQueue();
-  void receivedMap(const mrs_laser_mapping::MultiResolutionMapConstPtr& msg);
-  void update(MapType::Ptr map);
+  void receivedMap(const mrs_laser_mapping::MultiResolutionMapMsgConstPtr& msg);
+  void update(const mrs_laser_mapping::MultiResolutionMapMsgConstPtr& msg);
 
   void receivedPoseUpdate(const geometry_msgs::PoseStamped& msg);
 
@@ -140,7 +140,7 @@ private:
 
   ros::Time last_update_time_;
 
-  mrs_laser_maps::synchronized_circular_buffer<MapType::Ptr> map_buffer_;
+  mrs_laser_maps::synchronized_circular_buffer<mrs_laser_mapping::MultiResolutionMapMsgConstPtr> map_buffer_;
   boost::mutex map_buffer_mutex_;
   boost::shared_ptr<boost::thread> process_map_thread_;
 };

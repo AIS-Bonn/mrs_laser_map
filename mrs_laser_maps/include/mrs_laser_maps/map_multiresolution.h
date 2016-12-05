@@ -51,6 +51,8 @@
 #include <mrs_laser_maps/surfel_map_interface.h>
 #include <mrs_laser_maps/map_level.h>
 
+#define PARALLEL 1
+
 namespace mrs_laser_maps
 {
 template <typename MapPointType = pcl::PointXYZ, typename BufferType = boost::circular_buffer_space_optimized<MapPointType> >
@@ -137,16 +139,18 @@ public:
     }
   }
 
-  virtual void insertRay(const MapPointType& p, const Eigen::Matrix4f& origin)
-  {
-    for (auto& level : boost::adaptors::reverse(level_maps_) )
-    {
-      level->insertRay(p, origin);
-    }
-    evaluated_ = false;
-  }
+  virtual void insertRay(const PointCloudPtr& p, const Eigen::Matrix4f& origin);
+  
+  virtual void insertRay(const MapPointType& p, const Eigen::Matrix4f& origin);
+//   {
+//     for (auto& level : boost::adaptors::reverse(level_maps_) )
+//     {
+//       level->insertRay(p, origin);
+//     }
+//     evaluated_ = false;
+//   }
 
-  void evaluateAll();
+  virtual void evaluateAll();
 
   void unEvaluateAll();
 
@@ -285,7 +289,7 @@ public:
                         const Eigen::Matrix4f& origin = Eigen::Matrix4f::Identity());
   
   void setScanNumber(PointCloudPtr cloud){};
-  
+    
   int getSizeInMeters() const
   {
     return size_;
@@ -321,10 +325,26 @@ public:
     return evaluated_;
   }
   
+  void clearCellPoints()
+  {
+    for (auto& level : level_maps_ )
+    {
+      level->clearCellPoints();
+    }
+  }
+  
+  void clearUnoccupiedCells()
+  {
+    for (auto& level : level_maps_ )
+    {
+      level->clearUnoccupiedCells();
+    }
+  }
+  
 protected:
 
   unsigned int size_;
-  unsigned int resolution_;
+  float resolution_;
   std::string frame_id_;
 
   int cell_capacity_;
@@ -340,8 +360,8 @@ protected:
   bool evaluated_;
 };
 
-//template <>
-//  inline void MultiResolutionalMap<PointXYZRGBScanLabel, mrs_laser_maps::cell_buffer<PointXYZRGBScanLabel>>::setScanNumber(pcl::PointCloud<PointXYZRGBScanLabel>::Ptr cloud);
+template <>
+  inline void MultiResolutionalMap<PointXYZRGBScanLabel, mrs_laser_maps::cell_buffer<PointXYZRGBScanLabel>>::setScanNumber(pcl::PointCloud<PointXYZRGBScanLabel>::Ptr cloud);
 
   template <>
   inline void MultiResolutionalMap<PointXYZRGBScanLabel, boost::circular_buffer_space_optimized<PointXYZRGBScanLabel>>::setScanNumber(pcl::PointCloud<PointXYZRGBScanLabel>::Ptr cloud);

@@ -54,10 +54,10 @@ struct RegistrationParameters
 {
   RegistrationParameters()
   : associate_once_(true)
-  , prior_prob_(0.9)
-  , sigma_size_factor_(0.25)
-  , soft_assoc_c1_(1.0)
-  , soft_assoc_c2_(8.0)
+  , prior_prob_(0.25)
+  , sigma_size_factor_(0.45)
+  , soft_assoc_c1_(0.9)
+  , soft_assoc_c2_(10.0)
   , soft_assoc_c3_(1.0)
   , max_iterations_(100)
   {
@@ -174,6 +174,7 @@ public:
 
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr correspondences_source_points_;
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr correspondences_target_points_;
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr distance_field_points_;
   };
 
   void setRegistrationParameters(const RegistrationParameters& params);
@@ -182,10 +183,22 @@ public:
                                          MultiResolutionSurfelRegistration::CellInfoList& sceneCells,
                                          Eigen::Matrix4d& transform, double sigma);
 
+  
   bool estimateTransformationLevenbergMarquardt(mrs_laser_maps::SurfelMapInterface* model, mrs_laser_maps::SurfelMapInterface* scene, Eigen::Matrix4d& transform,
                                                 pcl::PointCloud<pcl::PointXYZRGB>::Ptr correspondencesSourcePoints,
                                                 pcl::PointCloud<pcl::PointXYZRGB>::Ptr correspondencesTargetPoints,
+                                                pcl::PointCloud<pcl::PointXYZRGB>::Ptr distanceFieldPoints,
                                                 int maxIterations);
+  
+  bool estimateTransformationLevenbergMarquardt(mrs_laser_maps::SurfelMapInterface* model, mrs_laser_maps::SurfelMapInterface* scene, Eigen::Matrix4d& transform,
+                                                pcl::PointCloud<pcl::PointXYZRGB>::Ptr correspondencesSourcePoints,
+                                                pcl::PointCloud<pcl::PointXYZRGB>::Ptr correspondencesTargetPoints,
+                                                int maxIterations)
+  {
+     pcl::PointCloud<pcl::PointXYZRGB>::Ptr distanceFieldPoints = boost::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>();
+     return estimateTransformationLevenbergMarquardt(model, scene, transform, correspondencesSourcePoints,
+                                                    correspondencesTargetPoints, distanceFieldPoints, maxIterations);
+  }
 
   bool estimateTransformationLevenbergMarquardt(mrs_laser_maps::SurfelMapInterface* model, mrs_laser_maps::SurfelMapInterface* scene, Eigen::Matrix4d& transform,
                                                 int maxIterations)
@@ -254,7 +267,7 @@ protected:
   bool associate_once_;
   
   int max_iterations_;
-  // 		tbb::task_scheduler_init init_;
+  tbb::task_scheduler_init init_;
 
 public:
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW;

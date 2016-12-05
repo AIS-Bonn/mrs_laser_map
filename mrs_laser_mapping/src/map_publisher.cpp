@@ -43,7 +43,7 @@ MapPublisher* MapPublisher::instance_ = 0;
 MapPublisher::MapPublisher() : node_handle_("~")
 {
   pub_marker_ = node_handle_.advertise<visualization_msgs::Marker>("occupied_cells_marker", 10);
-  pub_map_msg_ = node_handle_.advertise<mrs_laser_mapping::MultiResolutionMap>("multires_map", 10);
+  pub_map_msg_ = node_handle_.advertise<mrs_laser_mapping::MultiResolutionMapMsg>("multires_map", 10);
   pub_cloud_level_color_ = node_handle_.advertise<sensor_msgs::PointCloud2>("pointcloud_level_colored", 10);
   pub_cloud_scan_color_ = node_handle_.advertise<sensor_msgs::PointCloud2>("pointcloud_scan_colored", 10);
 }

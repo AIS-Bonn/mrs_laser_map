@@ -144,18 +144,19 @@ void MapNodelet::onInit()
 
   multiresolution_map_ = boost::make_shared<MapType>(map_size_, map_resolution_, map_levels_,
                                                                                    map_cell_capacity_, map_frame_id_);
+  
   // subscribe laserscanlines
   sub_cloud_.subscribe(phMT, "input", 3);
   cloud_message_filter_.reset(
       new tf::MessageFilter<sensor_msgs::PointCloud2>(sub_cloud_, tf_listener_, scan_assembler_frame_id_, 100, phMT));
   cloud_message_filter_->registerCallback(boost::bind(&MapNodelet::receivedCloud, this, _1));
 
-  service_clear_map_ = ph.advertiseService("/surfel_map/clear_map", &MapNodelet::clearMapServiceCall, this);
-  service_reset_ = ph.advertiseService("/surfel_map/reset", &MapNodelet::resetServiceCall, this);
-  service_decrease_once_ = ph.advertiseService("/surfel_map/decrease_once", &MapNodelet::decreaseOnceServiceCall, this);
+  service_clear_map_ = ph.advertiseService("clear_map", &MapNodelet::clearMapServiceCall, this);
+  service_reset_ = ph.advertiseService("reset", &MapNodelet::resetServiceCall, this);
+  service_decrease_once_ = ph.advertiseService("decrease_once", &MapNodelet::decreaseOnceServiceCall, this);
  
   service_add_points_ =
-      ph.advertiseService("/surfel_map/add_points_to_map", &MapNodelet::addPointsToMapServiceCall, this);
+      ph.advertiseService("add_points_to_map", &MapNodelet::addPointsToMapServiceCall, this);
   
   tf_broadcaster_thread_ =
       boost::shared_ptr<boost::thread>(new boost::thread(boost::bind(&MapNodelet::broadcastTf, this)));
@@ -380,8 +381,12 @@ void MapNodelet::registerScan(pcl::PointCloud<InputPointType>::Ptr cloud) //TODO
     surfel_registration_.estimateTransformationLevenbergMarquardt(multiresolution_map_.get(), &mapScene, transform );
     multiresolution_map_->unlock();
     
+    Eigen::Matrix<double, 6, 6> pose_cov;
+    surfel_registration_.estimatePoseCovariance(pose_cov, multiresolution_map_.get(), &mapScene, transform);
+    
     NODELET_DEBUG_STREAM("estimateTransformationLevenbergMarquardt took: " << registration_timer.getTime() << " ms");
-    NODELET_DEBUG_STREAM("transform \n" << transform);
+    NODELET_DEBUG_STREAM("transform " << transform);
+    NODELET_DEBUG_STREAM("cov norm: " << pose_cov.norm());
   }
   NODELET_DEBUG_STREAM("after registration: " << callback_timer.getTime() << " ms");
 
@@ -394,7 +399,7 @@ void MapNodelet::registerScan(pcl::PointCloud<InputPointType>::Ptr cloud) //TODO
     
     Eigen::Matrix4f sensorTransform = Eigen::Matrix4f::Identity();
     getTranform(sensor_frame_id_, "/base_link", scan_stamp, sensorTransform);
-
+    
     // add current cloud to map
     multiresolution_map_->addCloud(assembled_cloud_reg, param_update_occupancy_(), sensorTransform.inverse());
   }

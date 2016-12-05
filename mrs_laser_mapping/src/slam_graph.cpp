@@ -80,10 +80,10 @@ SlamGraph::SlamGraph()
   optimizer_->setAlgorithm(solverLevenberg);
   
   mrs_laser_maps::RegistrationParameters params;
-  params.prior_prob_ = 0.9;
-  params.sigma_size_factor_ = 0.25;
-  params.soft_assoc_c1_ = 1.0;
-  params.soft_assoc_c2_ = 8.0;
+  params.prior_prob_ = 0.25;
+  params.sigma_size_factor_ = 0.45;
+  params.soft_assoc_c1_ = 0.9;
+  params.soft_assoc_c2_ = 10.0;
   params.associate_once_ = false;
   params.max_iterations_ = 100;
   setRegistrationParameters(params);
@@ -223,11 +223,12 @@ bool SlamGraph::poseIsFar(const Eigen::Matrix4d& transform)
 }
 
 
-bool SlamGraph::update(MapPtr local_map)
+bool SlamGraph::update(MapPtr local_map, bool localize_only)
 {
   pcl::StopWatch stop_watch;
   
   bool add_new_node = false;
+  last_update_ == local_map->getLastUpdateTimestamp();
 
   if (graph_nodes_.empty())
   {
@@ -237,10 +238,12 @@ bool SlamGraph::update(MapPtr local_map)
   {
     Eigen::Matrix4d inc_transform = last_transform_;
     
+//     graph_nodes_[reference_node_id_]->map_->evaluateAll();
+    
     bool ret_val = false;
     ret_val = surfel_registration_.estimateTransformationLevenbergMarquardt(graph_nodes_[reference_node_id_]->map_.get(), local_map.get(),
                                                           inc_transform);
-    ROS_DEBUG_STREAM_NAMED("slam", "registration took: " << stop_watch.getTime());
+    ROS_DEBUG_STREAM_NAMED("slam", "registration took: " << stop_watch.getTime() << " with transform " << inc_transform);
 
     if (ret_val)
     {
@@ -260,7 +263,10 @@ bool SlamGraph::update(MapPtr local_map)
     }
   }
 
-  if (add_nodes_by_distance_ || add_node_manual_ || first_frame_)
+  if (localize_only)
+    ROS_DEBUG_STREAM_NAMED("slam", "map distorted. not adding.");
+  
+  if ( (add_nodes_by_distance_ || add_node_manual_ || first_frame_) && !localize_only)
   {
     if (add_new_node || add_node_manual_)
     {
@@ -305,7 +311,7 @@ bool SlamGraph::update(MapPtr local_map)
     // try to match between older key frames (that are close in optimized pose)
     connectClosePoses(false);
 
-    if (optimizer_->vertices().size() >= 3)
+    if ( optimizer_->vertices().size() >= 3)
     {
       // optimize slam graph
       ROS_DEBUG_STREAM_NAMED("slam", "optimizing...");
@@ -340,7 +346,7 @@ bool SlamGraph::update(MapPtr local_map)
 
     double dist = diffTransform.block<3, 1>(0, 3).norm();
 
-    if (poseIsClose(diffTransform) && dist < bestDist)
+    if (/*poseIsClose(diffTransform)*/ dist < 1.9 && dist < bestDist)
     {
       //			bestAngle = angle;
       bestDist = dist;
@@ -547,17 +553,23 @@ bool SlamGraph::refineEdge(g2o::EdgeSE3* edge, float register_start_resolution, 
   g2o::VertexSE3* v2 = dynamic_cast<g2o::VertexSE3*>(optimizer_->vertex(v2_id));
 
   Eigen::Matrix4d diff_transform = (v1->estimate().inverse() * v2->estimate()).matrix();
-
+  
   // register maps with pose guess from graph
   Eigen::Matrix<double, 6, 6> pose_cov;
 
   if (graph_nodes_map_.find(v1_id) == graph_nodes_map_.end() || graph_nodes_map_.find(v2_id) == graph_nodes_map_.end())
     return true;  // dont delete this edge!
 
-
+  
+  ROS_DEBUG_STREAM_NAMED("slam", "refineEdge: diff_transform" << diff_transform );
+  graph_nodes_map_[v1_id]->map_->evaluateAll();
+  graph_nodes_map_[v2_id]->map_->evaluateAll();
   bool ret_val = surfel_registration_.estimateTransformationLevenbergMarquardt(graph_nodes_map_[v1_id]->map_.get(),
                                                              graph_nodes_map_[v2_id]->map_.get(), diff_transform);
 
+  ROS_DEBUG_STREAM_NAMED("slam", " after refine: diff_transform" << diff_transform );
+
+	
   if (!ret_val)
     return false;
 
@@ -571,6 +583,11 @@ bool SlamGraph::refineEdge(g2o::EdgeSE3* edge, float register_start_resolution, 
 
     edge->setMeasurement(measurement_mean);
     edge->setInformation(measurement_information);
+    optimizer_->initializeOptimization();
+    optimizer_->optimize(10);
+    edge->computeError();
+    
+    
   }
 
   return ret_val;

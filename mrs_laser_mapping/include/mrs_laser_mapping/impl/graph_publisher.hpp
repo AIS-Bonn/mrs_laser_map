@@ -43,6 +43,7 @@
 #include <eigen_conversions/eigen_msg.h>
 
 #include <tf_conversions/tf_eigen.h>
+#include <pcl/filters/statistical_outlier_removal.h>
 
 #include <visualization_msgs/Marker.h>
 
@@ -277,12 +278,216 @@ void GraphPublisher<MapPointType, MapType>::publishOdometryGraph(GraphPtr graph,
   pub_slam_graph_marker_.publish(line_list);
 }
 
+
+template <typename MapPointType, typename MapType>
+void GraphPublisher<MapPointType, MapType>::publishSubGraph(GraphPtr graph, nav_msgs::Odometry odom_msg )
+{
+  
+  pub_odometry_.publish(odom_msg);
+
+  odometry_msgs_.push_back(odom_msg);
+  
+  if ( pub_slam_graph_marker_.getNumSubscribers() == 0 )
+     return; 
+  
+  visualization_msgs::Marker points, line_list, cylinders, innerCylinders, line_list_local_maps;
+  points.header.frame_id = line_list.header.frame_id = cylinders.header.frame_id = innerCylinders.header.frame_id = line_list_local_maps.header.frame_id = 
+      frame_id_slam_map_; 
+
+  points.header.stamp = line_list.header.stamp = cylinders.header.stamp = innerCylinders.header.stamp = line_list_local_maps.header.stamp = 
+      graph->graph_nodes_[0]->map_->getLastUpdateTimestamp();
+  points.ns = line_list.ns = cylinders.ns = innerCylinders.ns = line_list_local_maps.ns = "sub_graph_marker";
+  points.action = line_list.action = cylinders.action = innerCylinders.action = line_list_local_maps.action = visualization_msgs::Marker::ADD;
+  points.pose.orientation.w = line_list.pose.orientation.w = cylinders.pose.orientation.w = line_list_local_maps.pose.orientation.w =
+      innerCylinders.pose.orientation.w = 1.0;
+
+  unsigned int markerId = 1;
+  const double zOverlayOffset = 0.01;
+  double zOverlay = -1.0;
+
+  line_list.id = markerId++;
+  line_list_local_maps.id = markerId++;
+  
+  points.type = visualization_msgs::Marker::LINE_LIST;
+  line_list.type = visualization_msgs::Marker::LINE_LIST;
+  line_list_local_maps.type = visualization_msgs::Marker::LINE_LIST;
+  cylinders.type = visualization_msgs::Marker::SPHERE;
+  innerCylinders.type = visualization_msgs::Marker::CYLINDER;
+
+  points.scale.x = 0.025;
+
+  points.color.r = 0.f;
+  points.color.g = 0.f;
+  points.color.b = 0.f;
+  points.color.a = 1.0f;
+
+  line_list.scale.x = 0.05;
+
+  line_list.color.r = 0.5f;
+  line_list.color.g = 0.5f;
+  line_list.color.b = 0.5f;
+  line_list.color.a = 1.0f;
+
+  line_list_local_maps.scale.x = 0.02;
+
+  line_list_local_maps.color.r = 0.0f;
+  line_list_local_maps.color.g = 0.8f;
+  line_list_local_maps.color.b = 0.0f;
+  line_list_local_maps.color.a = 1.0f;
+
+  
+  cylinders.scale.x = 0.175;
+  cylinders.scale.y = 0.175;
+  cylinders.scale.z = 0.175;
+
+  cylinders.color.r = 0.1f;
+  cylinders.color.g = 0.1f;
+  cylinders.color.b = 1.f;
+  cylinders.color.a = 1.0f;
+
+  innerCylinders.scale.x = 0.2;
+  innerCylinders.scale.y = 0.2;
+  innerCylinders.scale.z = 0.005;
+
+  innerCylinders.color.r = 1.f;
+  innerCylinders.color.g = 1.f;
+  innerCylinders.color.b = 1.f;
+  innerCylinders.color.a = 1.0f;
+
+  geometry_msgs::Point lastPoint;
+  geometry_msgs::Point firstPoint;
+  for (unsigned int i = 1; i < odometry_msgs_.size(); i++)
+  {
+    geometry_msgs::Point p = odometry_msgs_[i].pose.pose.position;
+
+    Eigen::Vector3d lastPointEigen(lastPoint.x, lastPoint.y, lastPoint.z);
+    Eigen::Vector3d pointEigen(p.x, p.y, p.z);
+
+    if ((i > 1) && (pointEigen - lastPointEigen).norm() < cylinders.scale.x)
+      continue;
+
+//     zOverlay = -.5;
+    cylinders.pose = odometry_msgs_[i].pose.pose;
+//     zOverlay += zOverlayOffset;
+    cylinders.pose.position.z += zOverlay;
+    cylinders.id = markerId++;
+    pub_slam_graph_marker_.publish(cylinders);
+
+//     innerCylinders.pose = odometry_msgs_[i].pose.pose;
+// 
+//     zOverlay += zOverlayOffset;
+//     innerCylinders.pose.position.z += zOverlay;
+//     innerCylinders.id = markerId++;
+// 
+//     // time delta
+//     ros::Duration duration = odometry_msgs_[i].header.stamp - start_time_;
+// 
+//     float r, g, b;
+//     ColorMapJet::getRainbowColor((duration.toSec() / (60 * 20)), r, g, b);
+// 
+//     innerCylinders.color.r = r;
+//     innerCylinders.color.g = g;
+//     innerCylinders.color.b = b;
+//     innerCylinders.color.a = 1.0f;
+// 
+//     pub_slam_graph_marker_.publish(innerCylinders);
+
+    /*
+    geometry_msgs::Pose p2Pose = odom_msg[i].pose.pose;
+    Eigen::Affine3d p2Eigen;
+    tf::poseMsgToEigen( p2Pose, p2Eigen);
+    */
+    Eigen::Matrix4d p2EigenMatrix = Eigen::Matrix4d::Identity();  // p2Eigen.matrix();
+
+    Eigen::Quaterniond q(odometry_msgs_[i].pose.pose.orientation.w, odometry_msgs_[i].pose.pose.orientation.x,
+                         odometry_msgs_[i].pose.pose.orientation.y, odometry_msgs_[i].pose.pose.orientation.z);
+
+    p2EigenMatrix.block<3, 3>(0, 0) = q.matrix();
+
+    // 			Eigen::Vector4d pEigen(cylinders.scale.x/4, 0.0, 0.0, 1.0);
+    //  			pEigen = p2EigenMatrix * pEigen ;
+    // 			p.x += pEigen(0);
+    // 			p.y += pEigen(1);
+    // 			p.z += pEigen(2);
+    //
+
+    Eigen::Vector4d p2Eigen(cylinders.scale.x * 0.5, 0.0, 0.0, 1.0);
+    p2Eigen = p2EigenMatrix * p2Eigen;
+
+    geometry_msgs::Point p2 = odometry_msgs_[i].pose.pose.position;
+    p2.x += p2Eigen(0);
+    p2.y += p2Eigen(1);
+    p2.z += p2Eigen(2) ;
+
+    
+    // add something to z-component to overlay cylinders
+//     zOverlay += zOverlayOffset;
+    p.z += zOverlay;
+    p2.z += zOverlay;
+    points.points.push_back(p);
+    points.points.push_back(p2);
+    
+    if (i >= 2)
+    {
+      line_list.points.push_back(lastPoint);
+      line_list.points.push_back(p);
+    }
+
+    if ( i == 1)
+      firstPoint = p;
+    
+    
+    lastPoint = p;
+
+    
+    for (unsigned int j = 0; j < graph->graph_nodes_.size(); j++)
+    {
+      g2o::VertexSE3* v_curr = dynamic_cast<g2o::VertexSE3*>(graph->optimizer_->vertex(graph->graph_nodes_[j]->node_id_));
+
+      typename MapType::Ptr node_map_ptr =  boost::dynamic_pointer_cast<MapType> (graph->graph_nodes_[j]->map_);
+
+      // add coordinate frames for vertices
+      Eigen::Matrix4d camTransform = v_curr->estimate().matrix();
+
+      geometry_msgs::Point p_map;
+      p_map.x = camTransform(0, 3);
+      p_map.y = camTransform(1, 3);
+      p_map.z = camTransform(2, 3);
+      
+      int min_scan = std::max( (static_cast<int>(node_map_ptr->getScanNumber()) -static_cast<int>( 10) ), 0 );
+
+      
+      if ( (i+8) <= node_map_ptr->getScanNumber() && (i+8) >= min_scan )
+      {
+	line_list_local_maps.points.push_back(lastPoint);
+	line_list_local_maps.points.push_back(p_map);
+      }
+    }
+    
+    if ( i == 84 ) 
+    {
+      line_list_local_maps.points.push_back(lastPoint);
+      line_list_local_maps.points.push_back(firstPoint);
+    }
+      
+    
+  }
+
+  points.id = markerId++;
+  pub_slam_graph_marker_.publish(points);
+  pub_slam_graph_marker_.publish(line_list);
+  pub_slam_graph_marker_.publish(line_list_local_maps);
+}
+
+
 template <typename MapPointType, typename MapType>
 void GraphPublisher<MapPointType, MapType>::publishSLAMGraph(GraphPtr graph)
 {
   
   if ( pub_map_.getNumSubscribers() == 0 && pub_slam_graph_marker_.getNumSubscribers() == 0 && pub_map_downsampled_.getNumSubscribers() == 0 && pub_reference_keyframe_ == 0 )
       return; 
+
+  boost::mutex::scoped_lock(graph->getMutex());
   
   PointCloudPtr cloud_final =
       PointCloudPtr(new PointCloud());
@@ -293,7 +498,7 @@ void GraphPublisher<MapPointType, MapType>::publishSLAMGraph(GraphPtr graph)
   points.header.frame_id = line_list.header.frame_id =
       frame_id_slam_map_;  // slam->keyFrames_[ 0 ]->map_->getFrameId(); // "/slam_frame"; //
 
-  points.header.stamp = line_list.header.stamp = graph->graph_nodes_[0]->map_->getLastUpdateTimestamp();
+  points.header.stamp = line_list.header.stamp = graph->getLastUpdateTimestamp();
   points.ns = line_list.ns = "points_and_lines";
   points.action = line_list.action = visualization_msgs::Marker::ADD;
   points.pose.orientation.w = line_list.pose.orientation.w = 1.0;
@@ -304,8 +509,8 @@ void GraphPublisher<MapPointType, MapType>::publishSLAMGraph(GraphPtr graph)
   points.type = visualization_msgs::Marker::POINTS;
   line_list.type = visualization_msgs::Marker::LINE_LIST;
 
-  points.scale.x = 0.1;
-  points.scale.y = 0.1;
+  points.scale.x = 0.15;
+  points.scale.y = 0.15;
 
   line_list.scale.x = 0.05;
 
@@ -408,24 +613,44 @@ void GraphPublisher<MapPointType, MapType>::publishSLAMGraph(GraphPtr graph)
   pub_slam_graph_marker_.publish(points);
   pub_slam_graph_marker_.publish(line_list);
 
-  cloud_final->header.stamp = pcl_conversions::toPCL(graph->graph_nodes_[0]->map_->getLastUpdateTimestamp());
+   pcl::PointCloud<pcl::PointXYZRGBA>::Ptr cloud_downsampled_rgb =
+      pcl::PointCloud<pcl::PointXYZRGBA>::Ptr(new pcl::PointCloud<pcl::PointXYZRGBA>());
+  pcl::copyPointCloud(*cloudFinalDownsampled, *cloud_downsampled_rgb );
+
+  
+//   pcl::StatisticalOutlierRemoval<pcl::PointXYZRGBA> sor;
+//   sor.setInputCloud(cloud_downsampled_rgb);
+//   sor.setMeanK(50);
+//   sor.setStddevMulThresh(1.0);
+//   sor.filter(*cloud_downsampled_rgb);
+
+  
+  cloud_final->header.stamp = pcl_conversions::toPCL(graph->getLastUpdateTimestamp());
   cloud_final->header.frame_id = frame_id_slam_map_;  // slam->keyFrames_[ 0 ]->map_->getFrameId();
   pub_map_.publish(cloud_final);
 
-  cloudFinalDownsampled->header.stamp = pcl_conversions::toPCL(graph->graph_nodes_[0]->map_->getLastUpdateTimestamp());
-  cloudFinalDownsampled->header.frame_id = frame_id_slam_map_;  // slam->keyFrames_[ 0 ]->map_->getFrameId();
-  pub_map_downsampled_.publish(cloudFinalDownsampled);
+  cloud_downsampled_rgb->header.stamp = pcl_conversions::toPCL(graph->getLastUpdateTimestamp());
+  cloud_downsampled_rgb->header.frame_id = frame_id_slam_map_;  // slam->keyFrames_[ 0 ]->map_->getFrameId();
+  pub_map_downsampled_.publish(cloud_downsampled_rgb);
 
-  referenceKeyframeCloud->header.stamp = pcl_conversions::toPCL(graph->graph_nodes_[0]->map_->getLastUpdateTimestamp());
+  referenceKeyframeCloud->header.stamp = pcl_conversions::toPCL(graph->getLastUpdateTimestamp());
   referenceKeyframeCloud->header.frame_id = frame_id_slam_map_;  // slam->keyFrames_[ 0 ]->map_->getFrameId();
   pub_reference_keyframe_.publish(referenceKeyframeCloud);
 }
 
 template <typename MapPointType, typename MapType>
-void GraphPublisher<MapPointType, MapType>::publishGraph(GraphPtr graph)
+void GraphPublisher<MapPointType, MapType>::publishGraph(GraphPtr graph, bool compress)
 {
   if ( pub_keyframe_transforms_.getNumSubscribers() == 0)
     return;
+  
+  // TODO
+  ros::Time update_timestamp = ros::Time::now();
+  
+  if ((graph->graph_nodes_.size() - node_counter_) > 1 )
+  {
+      ROS_ERROR("GraphPublisher::publishGraph() latched processing not implented jet: subscribers must be connected on startup");
+  }
   
   /*
    * publish every keyframe that has not been published yet
@@ -440,17 +665,40 @@ void GraphPublisher<MapPointType, MapType>::publishGraph(GraphPtr graph)
     pcl::copyPointCloud(*cloud_cell_points, *cloud_cell_points_rgb);
 
     mrs_laser_mapping::KeyFrame key_frame_msg;
-    key_frame_msg.header.stamp = graph->graph_nodes_[0]->map_->getLastUpdateTimestamp();;
+    key_frame_msg.header.stamp = node_map_ptr->getLastUpdateTimestamp();;
     key_frame_msg.header.frame_id = frame_id_slam_map_;
     key_frame_msg.runID = run_id_;
     key_frame_msg.keyframeID = node_counter_++;
 
-    Compression compression;
-    VectorStream stream(&key_frame_msg.compressedCloud);
-    compression.encodePointCloud(cloud_cell_points_rgb, stream);
+    if (compress) 
+    {
+      Compression compression;
+      VectorStream stream(&key_frame_msg.compressedCloud);
+      compression.encodePointCloud(cloud_cell_points_rgb, stream);
+    }
+    else 
+    {
+//       sensor_msgs::PointCloud2 ros_cloud;
+      pcl::toROSMsg(*cloud_cell_points_rgb, key_frame_msg.uncompressed_cloud);
+//     key_frame_msg->cloud.push_back(ros_cloud);
+ 
+//       key_frame_msg.uncompressed_cloud = ros_cloud;   
+    }
+//   key_frame_msg.map_msg.header.stamp = last_msg->header.stamp;
+//   key_frame_msg.map_msg.header.frame_id = last_msg->header.frame_id; 
+//   key_frame_msg.map_msg.levels = last_msg->levels;
+//   key_frame_msg.map_msg.size_in_meters = last_msg->size_in_meters;
+//   key_frame_msg.map_msg.resolution = last_msg->resolution;
+//   key_frame_msg.map_msg.cell_capacity = last_msg->cell_capacity;
+//   key_frame_msg.map_msg.cell_capacity = last_msg->cell_capacity;
+//   key_frame_msg.map_msg.cloud = last_msg->cloud;
+//   key_frame_msg.map_msg.cloud = last_msg->cloud;
+//   key_frame_msg.map_msg.free_cell_centers = last_msg->free_cell_centers;
+    
+  pub_keyframes_.publish(key_frame_msg);
 
-    pub_keyframes_.publish(key_frame_msg);
-
+  // TODO: dont do this here!!
+  node_map_ptr->clearCellPoints();
 //     // if a new keyframe was added, let the thread calculate the point drift
 //     m_evaluatePointDrift = true;
   }	
@@ -459,7 +707,7 @@ void GraphPublisher<MapPointType, MapType>::publishGraph(GraphPtr graph)
    * publish transforms for each key frame and graph edges on each update (change for every optimizer run)
    */
   mrs_laser_mapping::KeyFrameTransforms transforms_msg;
-  transforms_msg.header.stamp = graph->graph_nodes_[0]->map_->getLastUpdateTimestamp();;
+  transforms_msg.header.stamp = update_timestamp;
   transforms_msg.header.frame_id = frame_id_slam_map_;
 
   // key frame transforms

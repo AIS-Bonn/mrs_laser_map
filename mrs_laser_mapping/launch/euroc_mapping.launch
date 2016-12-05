@@ -1,0 +1,144 @@
+<!--  -->
+<launch>
+  <arg name="scan_assembler_frame_id" default="/world"/>
+  <arg name="bagfile" default="/home/droeschel/bags/euroc_halle_2016_06_14/laser_2016-06-14-15-38-43.bag"/>
+  <arg name="rate" default="1.0"/>
+  
+  <param name="/use_sim_time" value="true" />
+
+  
+  <node pkg="rosbag" type="play" name="play" args="-r $(arg rate) --clock -s 20 $(arg bagfile)" output="screen" respawn="false" />
+  
+	<node name="config_server" pkg="config_server" type="config_server" output="screen" required="false">
+		<param name="config_path" value="$(find mrs_laser_mapping)/config" />
+		<param name="robot_name" value="mav_eurocfile:///home/droeschel/workspace/laser_mapping_release/src/mrs_laser_map/mrs_laser_mapping/config/config_mav_inventairy.yaml" />
+	</node>
+	
+	<node name="rviz_$(anon rviz)" pkg="rviz" type="rviz" args="-d $(find mrs_laser_mapping)/launch/euroc_mapping.rviz" required="true" output="screen"/>
+
+
+  <node if="1" pkg="tf" name="static_base_link_to_state_transform" type="static_transform_publisher" args="0 0 0 0 0 0 1 state base_link 10" />
+ 
+      
+  <!-- filter for jump edges and -->    
+  <node pkg="laser_filters" type="scan_to_scan_filter_chain" output="screen" name="laser_filter_1">
+    <remap from="scan" to="/scan" />
+    <remap from="scan_filtered" to="/filtered_scan" />
+    <param name="tf_message_filter_target_frame" type="string" value="base_link"/>
+    <rosparam command="load" file="$(find mrs_laser_mapping)/config/laser_shadow_filter.yaml" />
+  </node>
+  
+  
+  <node pkg="nodelet" type="nodelet" name="mapping_nodelet"  args="manager" output="screen">
+    <!-- param name="num_worker_threads" value="200"/ -->
+  </node>
+  <node pkg="nodelet" type="nodelet" name="scan_assembler_nodelet" args="load mrs_laser_mapping/scan_assembler_nodelet mapping_nodelet" output="screen" >
+    <remap from="~input" to="/filtered_scan" />
+    <remap from="~output" to="/scan_assembler_nodelet/assembled_cloud" />
+    
+    <!-- param name="frame_id" value="/world_corrected"/ -->
+    <param name="frame_id" value="$(arg scan_assembler_frame_id)"/>
+    <param name="transform_wait_duration" type="double" value="0.3" />
+    <param name="add_invalid_points" value="false"/>
+    <param name="half_rotation" value="true"/>
+  </node>
+
+  <node pkg="nodelet" type="nodelet" name="map_nodelet" args="load mrs_laser_mapping/map_nodelet mapping_nodelet" output="screen" >
+    <remap from="~input" to="/scan_assembler_nodelet/assembled_cloud" />
+  
+    <!-- frame id in which the scanlines are assembled -->
+    <param name="scan_assembler_frame_id" type="str" value="$(arg scan_assembler_frame_id)" />
+
+    <!-- frame id of the sensor (for raytracing) -->
+    <param name="sensor_frame_id" type="str" value="/rotator_link" />
+
+    <!-- first n scans are not registered to the map (e.g if robot is standing) -->
+    <param name="min_scans_registration" type="int" value="10" />
+  
+    <!-- first n local maps are not published to the global mapping (to avoid sparse maps in alloc. map) -->
+    <param name="min_scans_for_map_publishing" type="int" value="8" />
+    <!-- duration in seconds for waiting for a transform  -->
+    <param name="transform_wait_duration" type="double" value="0.2" />
+
+    <!-- parameters for registration -->
+    <param name="registration_max_iterations" type="int" value="100" />
+    <param name="registration_prior_prob" type="double" value="0.25" />
+    <param name="registration_soft_assoc_c1" type="double" value="0.9" />
+    <param name="registration_soft_assoc_c2" type="int" value="10" />
+    <param name="registration_sigma_size_factor" type="double" value="0.45" /> 
+
+    <!-- parameters for the local map -->
+    <param name="map_size" type="int" value="64" />
+    <param name="map_resolution" type="double" value="16.0" />
+    <param name="map_levels" type="int" value="3" />
+    <param name="map_cell_capacity" type="int" value="2500" />
+
+    <!-- parameters for downsampled map (for visualization) -->
+    <param name="map_downsampled_size" type="int" value="8" />
+    <param name="map_downsampled_resolution" type="double" value="20.0" />
+    <param name="map_downsampled_levels" type="int" value="4" />
+    <param name="map_downsampled_cell_capacity" type="int" value="100" />
+
+    <!-- add scans when troso is rotated. Set to false if torso rotation results in artifacts. Default: true-->
+    <param name="add_scans_when_torso_rotated" type="bool" value="true" />
+
+    <param name="decrease_rate" type="double" value="0.0" />
+  </node>
+
+  <group if="0">
+    <!-- ========= SLAM =========  -->
+	<node pkg="nodelet" type="nodelet" name="slam_nodelet" args="load mrs_laser_mapping/slam_nodelet mapping_nodelet" output="log" >
+		<remap from="~map" to="/mapping_nodelet/multires_map" />
+
+		<param name="odom_frame_id" type="str" value="$(arg scan_assembler_frame_id)" />
+		
+		<!-- parameters for the registration method -->
+		<param name="max_iter"                                                 type="int"              value="100" />
+		<param name="prior_prob"                                               type="double"   value="0.25" />
+		<param name="soft_assoc_c1"                                     type="double"   value="0.9" />
+		<param name="soft_assoc_c2"                                     type="int"              value="10" />
+		<param name="sigma_size_factor"                                 type="double"   value="0.45" /> 
+
+		<param name="add_vertex_dist"                                               type="double"   value="2.5" />
+		<param name="add_vertex_angle"                                     type="double"   value="0.5" />
+		<param name="connect_vertex_dist"                                               type="double"   value="4.0" />
+	</node>
+
+	
+  </group>
+
+  <node pkg="nodelet" type="nodelet" name="slam_visualizer_nodelet" args="load mrs_laser_mapping/slam_visualizer_nodelet mapping_nodelet" output="screen" >
+    <remap from="~keyframe_transforms" to="/mapping_nodelet/keyframe_transforms" />
+    <remap from="~keyframes" to="/mapping_nodelet/keyframes" />
+    <param name="voxel_leaf_size"                                               type="double"   value="0.05" />
+    <param name="filter_limit_max_z" type="double" value="2.0" /> 	      
+  </node>
+  
+  <!-- Run a passthrough filter to cut ceiling -->
+  <node pkg="nodelet" type="nodelet" name="passthrough" args="load pcl/PassThrough mapping_nodelet" output="screen">
+    <remap from="~input" to="/mapping_nodelet/pointcloud_scan_colored" />
+    <remap from="~output" to="/mapping_nodelet/pointcloud_cut" />
+    <rosparam>
+      filter_field_name: z
+      filter_limit_min: -3.0
+      filter_limit_max: 2.3
+      filter_limit_negative: False
+    </rosparam>
+  </node>
+
+  <node pkg="nodelet" type="nodelet" name="cropbox" args="load pcl/CropBox mapping_nodelet" output="screen">
+    <remap from="~input" to="/scan_assembler_nodelet/assembled_cloud" />
+    <remap from="~output" to="/scan_assembler_nodelet/assembled_cloud_crop" />
+    <rosparam>
+      min_x: -2.0
+      max_x: 2.0
+      min_y: -1.0
+      max_y: 1.0
+      min_z: -1.0
+      max_z: 1.0
+      negative: True
+    </rosparam>
+  </node>
+  
+</launch>
+		

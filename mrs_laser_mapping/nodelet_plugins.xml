@@ -6,6 +6,14 @@
   </class>
 </library>
 
+<library path="lib/libvelodyne_assembler_nodelet">
+  <class name="mrs_laser_mapping/velodyne_assembler_nodelet" type="mrs_laser_mapping::VelodyneAssemblerNodelet" base_class_type="nodelet::Nodelet">
+  <description>
+  velodyne assembler nodelet
+  </description>
+  </class>
+</library>
+
 <library path="lib/libmap_nodelet">
   <class name="mrs_laser_mapping/map_nodelet" type="mrs_laser_mapping::MapNodelet" base_class_type="nodelet::Nodelet">
   <description>
@@ -13,6 +21,14 @@
   </description>
   </class>
 </library>
+
+<!--<library path="lib/libmap_nodelet_refine">
+  <class name="mrs_laser_mapping/map_nodelet_refine" type="mrs_laser_mapping::MapNodeletRefine" base_class_type="nodelet::Nodelet">
+  <description>
+  map nodelet refined
+  </description>
+  </class>
+</library>-->
 
 <library path="lib/libslam_nodelet">
   <class name="mrs_laser_mapping/slam_nodelet" type="mrs_laser_mapping::SlamNodelet" base_class_type="nodelet::Nodelet">

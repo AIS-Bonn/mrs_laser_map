@@ -74,6 +74,7 @@ class MapNodelet : public nodelet::Nodelet
 public:
   
   typedef PointXYZRGBScanLabel MapPointType;
+//   typedef pcl::PointXYZ MapPointType;
   typedef PointXYZScanLine InputPointType;
   
   typedef mrs_laser_maps::MultiResolutionalMap<MapPointType> MapType;

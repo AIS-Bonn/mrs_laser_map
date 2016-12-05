@@ -1,0 +1,16 @@
+<launch>
+	
+	<arg name="bagfile" default="/home/droeschel/bags/flight3/slam_2015-05-19-14-47-09.bag"/>
+<node pkg="tf" type="tf_remap" name="tf_remapper" output="screen">
+  <rosparam param="mappings">
+    [{old: /map, new: /odom}, {old: /base_link_oriented, new: /base_link_oriented}]
+  </rosparam>
+</node>
+
+<node pkg="rosbag" type="play" name="player" args="--clock --start=0 $(arg bagfile)">
+  <remap from="tf" to="tf_old" />
+</node>
+
+
+</launch>
+		

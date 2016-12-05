@@ -129,6 +129,17 @@ void ScanAssemblerNodelet::processScans()
       first_stamp_ = scan.header.stamp;
       is_first_scan_line_ = false;
     }
+    // when having multiple scanners, we can receive scans from earlier timestamps. 
+    else if (  scan.header.stamp < first_stamp_ )   
+    {
+      // correct points from the previous scans 
+      unsigned int scan_line_correction = static_cast<unsigned int>(ros::Duration(first_stamp_ - scan.header.stamp ).toNSec()*1e-6);
+      for ( OutputPointType& p : cloud_for_assembler_->points )
+      {
+	p.scanlineNr += scan_line_correction ;
+      }
+      first_stamp_ = scan.header.stamp;
+    }
     
     sensor_msgs::PointCloud2 cloud;
     pcl::PointCloud<PointT>::Ptr cloud_transformed(new pcl::PointCloud<PointT>());
@@ -162,7 +173,7 @@ void ScanAssemblerNodelet::processScans()
       }
       else
       {
-        scan_projector_.transformLaserScanToPointCloud(frame_id_, scan, cloud, tf_listener_, scan.range_max - 0.01,
+        scan_projector_.transformLaserScanToPointCloud(frame_id_, scan, cloud, tf_listener_, 35.f,
         laser_geometry::channel_option::Default);
       }
 
@@ -197,6 +208,11 @@ void ScanAssemblerNodelet::processScans()
 
       p.scanlineNr = scan_line_number;
       p.pointNr = point_number++;
+      
+      if (scan.header.frame_id == scan_header_frame_id_ )
+	p.scannerNr = 0;
+      else
+	p.scannerNr = 1;
       
       cloud_for_assembler_->push_back(p);
     }

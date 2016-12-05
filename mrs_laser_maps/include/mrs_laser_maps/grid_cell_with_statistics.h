@@ -72,9 +72,16 @@ public:
   ~GridCellWithStatistics() 
   {
   }
+  virtual void clearCell()
+  {
+    GridCell<PointType,BufferType>::clearCell();
+    surfel_.clear();
+  }
   
   void evaluate() 
   {
+    surfel_.clear();
+    
     mrs_laser_maps::Surfel surfel;
     CircularBufferPtr buffer = this->getPoints();
 
@@ -93,13 +100,18 @@ public:
     surfel_.evaluate();
   }
 
+  template <typename U = PointType, typename std::enable_if<!std::is_same<U, PointXYZRGBScanLabel>::value, int>::type = 0>  
+  void evaluate(unsigned int skipScan){ ROS_ERROR("called empty evaluate");};
+  
   template <typename U = PointType, typename std::enable_if<std::is_same<U, PointXYZRGBScanLabel>::value, int>::type = 0>
   void evaluate(unsigned int skipScan)
   {
+    surfel_.clear();
+
     mrs_laser_maps::Surfel surfel;
     CircularBufferPtr buffer = this->getPoints();
 
-    for ( CircularBufferIterator it_cell = buffer->begin(); it_cell != buffer->end();
+    for ( auto it_cell = buffer->begin(); it_cell != buffer->end();
          it_cell++)
     {
       if ((*it_cell).scanNr != skipScan)
@@ -108,7 +120,7 @@ public:
         pos(0) = (*it_cell).x;
         pos(1) = (*it_cell).y;
         pos(2) = (*it_cell).z;
-
+    
         surfel.add(pos);
       }
     }
@@ -116,6 +128,83 @@ public:
     surfel_ += surfel;
     surfel_.evaluate();
   }
+   
+  void evaluateByScanLine(const std::vector<unsigned int>& labels)
+  {
+    surfel_.clear();
+
+    mrs_laser_maps::Surfel surfel;
+    mrs_laser_maps::Surfel scan_line_surfel;
+    bool found_scan_line = false;
+    
+    CircularBufferPtr buffer = this->getPoints();
+
+    for ( auto it_cell = buffer->begin(); it_cell != buffer->end();
+         it_cell++)
+    {
+      if (std::find(labels.begin(), labels.end(), (*it_cell).scanlineNr) != labels.end())
+      {
+        Eigen::Matrix<double, 3, 1> pos;
+        pos(0) = (*it_cell).x;
+        pos(1) = (*it_cell).y;
+        pos(2) = (*it_cell).z;
+    
+        scan_line_surfel.add(pos);
+	found_scan_line = true;
+      }
+      else 
+      {
+        Eigen::Matrix<double, 3, 1> pos;
+        pos(0) = (*it_cell).x;
+        pos(1) = (*it_cell).y;
+        pos(2) = (*it_cell).z;
+    
+        surfel.add(pos);
+      }
+    }
+    if (found_scan_line)
+    {
+      surfel_ += scan_line_surfel;
+      surfel_.priorize_weight_ = true;
+    
+      surfel_.degrade_weight_ = false;
+      surfel_.weight_scale_ = 1.0;
+    }
+    else
+    {
+      surfel_ += surfel;
+      surfel_.weight_scale_ = 0.1;
+      surfel_.degrade_weight_ = true;
+    }
+    surfel_.evaluate();
+    
+  }
+   
+  template <typename U = PointType, typename std::enable_if<std::is_same<U, PointXYZRGBScanLabel>::value, int>::type = 0>
+  void evaluate(const std::vector<unsigned int>& labels)
+  {
+    surfel_.clear();
+
+    mrs_laser_maps::Surfel surfel;
+    CircularBufferPtr buffer = this->getPoints();
+
+    for ( auto it_cell = buffer->begin(); it_cell != buffer->end();
+         it_cell++)
+    {
+      if (std::find(labels.begin(), labels.end(), (*it_cell).scanNr) != labels.end())
+      {
+	Eigen::Matrix<double, 3, 1> pos;
+	pos(0) = (*it_cell).x;
+	pos(1) = (*it_cell).y;
+	pos(2) = (*it_cell).z;
+
+	surfel.add(pos);
+      }
+    }
+
+    surfel_ += surfel;
+    surfel_.evaluate();
+  } 
    
   void addPoint(const PointType &p)
   {
@@ -183,28 +272,28 @@ public:
 private:
 };
 
-//template <>
-//inline void GridCellWithStatistics<PointXYZRGBScanLabel, mrs_laser_maps::cell_buffer<PointXYZRGBScanLabel>>::addPoint(const boost::shared_ptr<PointXYZRGBScanLabel>& p)
-//{
-//  GridCell<PointXYZRGBScanLabel,mrs_laser_maps::cell_buffer<PointXYZRGBScanLabel>>::addPoint(p);
-//  surfel_.unevaluate();
-//}
+template <>
+inline void GridCellWithStatistics<PointXYZRGBScanLabel, mrs_laser_maps::cell_buffer<PointXYZRGBScanLabel>>::addPoint(const boost::shared_ptr<PointXYZRGBScanLabel>& p)
+{
+  GridCell<PointXYZRGBScanLabel,mrs_laser_maps::cell_buffer<PointXYZRGBScanLabel>>::addPoint(p);
+  surfel_.unevaluate();
+}
 
-//template <>
-//inline bool GridCellWithStatistics<PointXYZRGBScanLabel, mrs_laser_maps::cell_buffer<PointXYZRGBScanLabel>>::getPointByLabel(unsigned int label, PointXYZRGBScanLabel& point )
-//{
-//  
-//  
-//  return ( this->getPoints()->find(label, point) );
-//  
-//}
+template <>
+inline bool GridCellWithStatistics<PointXYZRGBScanLabel, mrs_laser_maps::cell_buffer<PointXYZRGBScanLabel>>::getPointByLabel(unsigned int label, PointXYZRGBScanLabel& point )
+{
+  
+  
+  return ( this->getPoints()->find(label, point) );
+  
+}
 
-//template <>
-//inline bool GridCellWithStatistics<PointXYZRGBScanLabel, mrs_laser_maps::cell_buffer<PointXYZRGBScanLabel>>::updateByLabel(const PointXYZRGBScanLabel& point )
-//{
-//  return this->getPoints()->update(point);
-//
-//}
+template <>
+inline bool GridCellWithStatistics<PointXYZRGBScanLabel, mrs_laser_maps::cell_buffer<PointXYZRGBScanLabel>>::updateByLabel(const PointXYZRGBScanLabel& point )
+{
+  return this->getPoints()->update(point);
+
+}
 
 }
 

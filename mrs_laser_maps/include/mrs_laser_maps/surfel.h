@@ -65,8 +65,8 @@ public:
     , sum_squares_(surfel.sum_squares_)
     , up_to_date_(surfel.up_to_date_)
     , evaluated_(surfel.evaluated_)
+    , priorize_weight_(surfel.priorize_weight_)
   {
-    clear();
   }
   
   ~Surfel()
@@ -83,6 +83,9 @@ public:
     sum_squares_.setZero();
     first_view_dir_.setZero();
 
+    priorize_weight_ = false;
+    degrade_weight_ = false;
+    
     up_to_date_ = false;
     evaluated_ = false;
   }
@@ -203,6 +206,9 @@ public:
   Eigen::Matrix<double, 3, 3> cov_, invcov_, sum_squares_;
   bool up_to_date_, evaluated_;
 
+  bool priorize_weight_ = false;
+  bool degrade_weight_ = false;
+  double weight_scale_ = 1.f;
 public:
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
 

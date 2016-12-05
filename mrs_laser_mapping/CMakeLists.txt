@@ -12,9 +12,7 @@ find_package(catkin REQUIRED COMPONENTS
 	roscpp
 	sensor_msgs
 	std_msgs
-	pcl_conversions
 	pcl_ros
-	pcl_msgs
 	laser_geometry
 	tf
 	geometry_msgs
@@ -25,7 +23,6 @@ find_package(catkin REQUIRED COMPONENTS
 	cmake_modules
 	message_generation
 	config_server
-	interactive_markers
 	cloud_compression
 	eigen_conversions
 	mrs_laser_maps
@@ -34,7 +31,7 @@ find_package(catkin REQUIRED COMPONENTS
 find_package(PCL REQUIRED)
 
 add_message_files(FILES
-	MultiResolutionMap.msg
+	MultiResolutionMapMsg.msg
 	KeyFrame.msg
 	KeyFrameTransforms.msg
 )
@@ -57,6 +54,8 @@ generate_messages(
 
 catkin_package(
    INCLUDE_DIRS include
+   LIBRARIES ${PROJECT_NAME}_slam 
+  CATKIN_DEPENDS message_runtime sensor_msgs std_msgs geometry_msgs nav_msgs visualization_msgs
 )
 
 include_directories(
@@ -67,12 +66,13 @@ include_directories(
 
 add_definitions(${PCL_DEFINITIONS})
 
-#add_definitions(-DDEBUG_CELL_HITS)
+# add_definitions(-DDEBUG_CELL_HITS)
+add_definitions(-DPARALLEL)
                                                                                                 
-# boost required
-find_package(Boost REQUIRED COMPONENTS program_options thread system signals regex filesystem) 
-include_directories(${Boost_INCLUDE_DIRS}) 
-
+# # boost required
+# find_package(Boost REQUIRED COMPONENTS program_options thread system signals regex filesystem) 
+# include_directories(${Boost_INCLUDE_DIRS}) 
+# 
 # G2O required
 find_package(G2O REQUIRED)
 include_directories(${G2O_INCLUDE_DIR})
@@ -80,7 +80,7 @@ include_directories(${G2O_INCLUDE_DIR})
 # TBB required
 find_package(TBB REQUIRED)
 include_directories(${TBB_INCLUDE_DIRS})
-
+# 
 # For building the CHOLMOD / CSPARSE solvers
 find_package(Cholmod)
 include_directories(${CHOLMOD_INCLUDE_DIR})
@@ -89,12 +89,12 @@ find_package(LAPACK)
 find_package(CSparse)
 include_directories(${CSPARSE_INCLUDE_DIR})
 
-find_package(mrs_laser_maps REQUIRED) 
+
 
 #set the default path for built executables to the "bin" directory
-set(EXECUTABLE_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/bin)
+# set(EXECUTABLE_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/bin)
 #set the default path for built libraries to the "lib" directory
-set(LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/lib)
+# set(LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/lib)
         
 SET ( SRCS
   src/map_publisher.cpp
@@ -113,9 +113,20 @@ SET (SLAM_LIBS
         ${G2O_TYPES_SLAM3D} 
 )
 
+
+# 
+# add_library(${PROJECT_NAME}_slam ${SLAM_SRCS} )
+# target_link_libraries(${PROJECT_NAME}_slam  ${SLAM_LIBS} ${TBB_LIBRARIES} ${Boost_LIBRARIES} ${catkin_LIBRARIES})
+
 add_library(scan_assembler_nodelet src/nodes/scan_assembler_nodelet.cpp)
 target_link_libraries(scan_assembler_nodelet ${catkin_LIBRARIES})
 add_dependencies(scan_assembler_nodelet
+	${PROJECT_NAME}_generate_messages_cpp
+)
+
+add_library(velodyne_assembler_nodelet src/nodes/velodyne_assembler_nodelet.cpp)
+target_link_libraries(velodyne_assembler_nodelet ${catkin_LIBRARIES})
+add_dependencies(velodyne_assembler_nodelet
 	${PROJECT_NAME}_generate_messages_cpp
 )
 

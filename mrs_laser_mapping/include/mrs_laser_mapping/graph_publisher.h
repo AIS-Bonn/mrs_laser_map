@@ -53,6 +53,7 @@
 
 #include <mrs_laser_maps/map_multiresolution.h>
 #include <mrs_laser_mapping/color_utils.h>
+#include <mrs_laser_mapping/MultiResolutionMapMsg.h>
 
 namespace mrs_laser_mapping
 {
@@ -76,10 +77,12 @@ public:
   static GraphPublisher* getInstance();
 
   void publishOdometryGraph(GraphPtr graph, nav_msgs::Odometry odometry_msg );
+  
+  void publishSubGraph(GraphPtr graph, nav_msgs::Odometry odometry_msg );
 
   void publishSLAMGraph(GraphPtr graph);
-
-  void publishGraph(GraphPtr graph);
+  
+  void publishGraph(GraphPtr graph, bool compress = false);
 
   void resetNodeCounter()
   {

@@ -52,6 +52,7 @@ using namespace mrs_laser_maps;
 #define SOFTASSIGN 1
 
 MultiResolutionSurfelRegistration::MultiResolutionSurfelRegistration(const RegistrationParameters& params)
+: init_(16)
 {
   use_prior_pose_ = false;
   prior_pose_mean_ = Eigen::Matrix<double, 6, 1>::Zero();
@@ -146,6 +147,7 @@ public:
     neighbors = 0;
 #endif
     int level = 0;
+//     if (model_->getCell(scenePointTransformed.cast<float>(), cellPtrs, cellOffsets, levels, neighbors, true))
     if (model_->getCell(scenePointTransformed.cast<float>(), cellPtrs, cellOffsets, levels, neighbors))
     {
       level = levels[0];
@@ -194,7 +196,7 @@ public:
 
   MultiResolutionSurfelRegistration::CellInfoList* scene_cells_;
 
-  double sigma_, sigma2_;
+  double sigma_, sigma2_; // TODO: remove 
 
   double sigma_size_factor_;
 
@@ -330,6 +332,12 @@ public:
                            sqrt(params_->soft_assoc_c2 * M_PI * M_PI * M_PI * cov_ps.determinant()) *
                            exp(-0.5 * diff.dot(invcov_ps * diff));
 
+			   
+//       if ( singleAssoc.cell_scene_->getSurfel().priorize_weight_ )
+//       {
+// 	ROS_INFO_THROTTLE(0.1, "found priorized surfel");
+// 	singleAssoc.weight = 1.f;
+//       }
 #else
       singleAssoc.weight = 1.f;
 #endif
@@ -371,6 +379,14 @@ public:
     if (sumWeight > 0.0)
     {
       double invSumWeight = 1.0 / sumWeight;
+      if (assoc.cell_scene_->getSurfel().degrade_weight_)
+      {
+	invSumWeight = 0.1 / sumWeight;
+// 	ROS_INFO_STREAM_THROTTLE(0.1, "degraded: " << invSumWeight << " " << sumWeight);
+      }
+      else 
+// 	ROS_INFO_STREAM_THROTTLE(0.1, "not degraded: " << invSumWeight<< " " << sumWeight);
+      
       for (unsigned int i = 0; i < assoc.associations_.size(); i++)
       {
         //				MultiResolutionSurfelRegistration::SingleAssociation& singleAssoc = assoc.associations_[i];
@@ -440,6 +456,7 @@ bool MultiResolutionSurfelRegistration::registrationErrorFunctionLM(
   {
     params.correspondences_source_points_->points.reserve(10 * associations.size());
     params.correspondences_target_points_->points.reserve(10 * associations.size());
+    params.distance_field_points_->points.reserve(10 * associations.size());
   }
 
   timer.reset();
@@ -448,6 +465,11 @@ bool MultiResolutionSurfelRegistration::registrationErrorFunctionLM(
   for (MultiResolutionSurfelRegistration::AssociationList::iterator it2 = associations.begin();
        it2 != associations.end(); ++it2)
   {
+    float assocSumError = 0.f;
+    float assocSumWeight = 0.f;
+    int assocNumMatches = 0;
+    pcl::PointXYZRGB scene_mean;
+
     //		for( MultiResolutionSurfelRegistration::SingleAssociationList::iterator it = it2->associations_.begin(); it !=
     //it2->associations_.end(); ++it ) {
     for (unsigned int i = 0; i < it2->associations_.size(); i++)
@@ -462,13 +484,16 @@ bool MultiResolutionSurfelRegistration::registrationErrorFunctionLM(
       //		float weight = it->weight * exp( -0.5 * (it->z - it->f).squaredNorm() * it->inv_sigma2 );
 
       
-      if (isnan(it->error) || isnan(weight))
+      if (std::isnan(it->error) || std::isnan(weight))
         ROS_DEBUG_STREAM_NAMED("surfel_registration","skipping nan values.");
       else
       {
         sumError += weight * it->error;
         sumWeight += weight;
         numMatches += 1.0;  // nweight;
+	assocNumMatches += 1;
+        assocSumError += weight * it->error;
+	assocSumWeight += weight;
       }
       
 
@@ -477,6 +502,7 @@ bool MultiResolutionSurfelRegistration::registrationErrorFunctionLM(
       {
         pcl::PointXYZRGB p1;
         pcl::PointXYZRGB p2;
+        pcl::PointXYZRGB p3;
 
         Eigen::Vector4f pos1;
         pos1.block<3, 1>(0, 0) = it->model_mean.cast<float>();
@@ -507,11 +533,25 @@ bool MultiResolutionSurfelRegistration::registrationErrorFunctionLM(
         p2.g = 0;
         p2.b = (1.f - weight) * 255.f;
 
+	scene_mean.x = pos_src[0];
+        scene_mean.y = pos_src[1];
+        scene_mean.z = pos_src[2];
+
+	cidx++;
+
+	
         params.correspondences_source_points_->points.push_back(p1);
         params.correspondences_target_points_->points.push_back(p2);
+    
+	
       }
-      cidx++;
     }
+    
+    
+    scene_mean.r = (assocSumError / assocSumWeight) * 255.f;
+    scene_mean.b = 0;
+    scene_mean.g = (1.f - (assocSumError / assocSumWeight)) * 255.f;
+    params.distance_field_points_->points.push_back(scene_mean);
   }
 
   ROS_DEBUG_STREAM_NAMED("surfel_registration", "took: " << timer.getTime() << " for " << numMatches << " matches from "
@@ -523,6 +563,7 @@ bool MultiResolutionSurfelRegistration::registrationErrorFunctionLM(
   {
     params.correspondences_source_points_->points.resize(cidx);
     params.correspondences_target_points_->points.resize(cidx);
+    params.distance_field_points_->points.resize(associations.size());
   }
 
   if (sumWeight <= 1e-10)
@@ -583,18 +624,28 @@ bool MultiResolutionSurfelRegistration::registrationErrorFunctionWithFirstAndSec
   {
     params.correspondences_source_points_->points.reserve(10 * associations.size());
     params.correspondences_target_points_->points.reserve(10 * associations.size());
+    params.distance_field_points_->points.reserve(10 * associations.size());
   }
 
+  std::vector< float > sumWeightsForAssocs;
+  std::vector< float > sumErrorsForAssocs;
+  std::vector< pcl::PointXYZRGB > sumScenePointsForAssocs;
   double numMatches = 0;
   for (MultiResolutionSurfelRegistration::AssociationList::iterator it2 = associations.begin();
        it2 != associations.end(); ++it2)
   {
+    pcl::PointXYZRGB scene_mean;;
+    float assocSumError = 0.f;
+    float assocSumWeight = 0.f;
+    int assocNumMatches = 0;
     //		for( MultiResolutionSurfelRegistration::SingleAssociationList::iterator it = it2->associations_.begin(); it !=
     //it2->associations_.end(); ++it ) {
     for (unsigned int i = 0; i < it2->associations_.size(); i++)
     {
       MultiResolutionSurfelRegistration::SingleAssociation* it = &it2->associations_[i];
-
+      
+    
+    
       if (!it->match)
         continue;
 
@@ -604,7 +655,7 @@ bool MultiResolutionSurfelRegistration::registrationErrorFunctionWithFirstAndSec
 
       const Eigen::Matrix<double, 6, 3> JtW = weight * it->df_dx.transpose() * it->W;
 
-      if (isnan(it->error) || isnan(weight))
+      if (std::isnan(it->error) || std::isnan(weight))
         ROS_DEBUG_STREAM_NAMED("surfel_registration","skipping nan values.");
       else
       {
@@ -614,12 +665,17 @@ bool MultiResolutionSurfelRegistration::registrationErrorFunctionWithFirstAndSec
         sumError += weight * it->error;
         sumWeight += weight;
         numMatches += 1.0;  // nweight;
+	
+	assocNumMatches += 1;
+        assocSumError += weight * it->error;
+	assocSumWeight += weight;
       }
 
       if (params.correspondences_source_points_)
       {
         pcl::PointXYZRGB p1;
         pcl::PointXYZRGB p2;
+//         pcl::PointXYZRGB p3;
 
         Eigen::Vector4f pos1;
         pos1.block<3, 1>(0, 0) = it->model_mean.cast<float>();
@@ -649,19 +705,60 @@ bool MultiResolutionSurfelRegistration::registrationErrorFunctionWithFirstAndSec
         p2.r = weight * 255.f;
         p2.g = 0;
         p2.b = (1.f - weight) * 255.f;
+	
+	scene_mean.x = pos_src[0];
+        scene_mean.y = pos_src[1];
+        scene_mean.z = pos_src[2];
+/*
+        p3.r = 0.f;
+        p3.g = weight * it->error * 255.f;
+        p3.b = (1.f - weight * it->error) * 255.f;*/
 
-        cidx++;
-
-        params.correspondences_source_points_->points.push_back(p1);
+       params.correspondences_source_points_->points.push_back(p1);
         params.correspondences_target_points_->points.push_back(p2);
+    
+	cidx++;
       }
+      
+    }
+    
+    if (it2->associations_.size() > 0)
+    {
+    
+      sumScenePointsForAssocs.push_back(scene_mean);
+      sumErrorsForAssocs.push_back(assocSumError/assocSumWeight);
+      sumWeightsForAssocs.push_back(assocSumWeight);
+      
     }
   }
 
+  float max_error = *std::max_element(sumErrorsForAssocs.begin(), sumErrorsForAssocs.end());
+
+  std::vector <float> sorted_error(sumErrorsForAssocs.begin(), sumErrorsForAssocs.end());
+  
+//    std::nth_element(sumErrorsForAssocs.begin(), sumErrorsForAssocs.end());
+    std::nth_element(sorted_error.begin(), sorted_error.begin()+5, sorted_error.end(), std::greater<int>());
+
+   
+  for ( int i = 0; i < sumScenePointsForAssocs.size(); i++ )
+  {
+    pcl::PointXYZRGB scene_mean = sumScenePointsForAssocs[i];
+    float error_scaled = sumErrorsForAssocs[i] / sorted_error[5];
+  
+//     std::cout << "max error: " << max_error << "second: " << sorted_error[5] <<  " error: " << sumErrorsForAssocs[i] << " scaled: " << error_scaled << std::endl;
+    
+    scene_mean.r = (error_scaled ) * 255.f;
+    scene_mean.g = 0;
+    scene_mean.b = (1.f - error_scaled) * 255.f;
+    params.distance_field_points_->points.push_back(scene_mean);
+    
+  }
+  
   if (params.correspondences_source_points_)
   {
     params.correspondences_source_points_->points.resize(cidx);
     params.correspondences_target_points_->points.resize(cidx);
+    params.distance_field_points_->points.resize(associations.size());
   }
 
   if (sumWeight <= 1e-10)
@@ -698,8 +795,10 @@ bool MultiResolutionSurfelRegistration::registrationErrorFunctionWithFirstAndSec
 bool MultiResolutionSurfelRegistration::estimateTransformationLevenbergMarquardt(
     mrs_laser_maps::SurfelMapInterface* model, mrs_laser_maps::SurfelMapInterface* scene, Eigen::Matrix4d& transform,
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr correspondencesSourcePoints,
-    pcl::PointCloud<pcl::PointXYZRGB>::Ptr correspondencesTargetPoints, int maxIterations)
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr correspondencesTargetPoints,
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr distanceFieldPointsPoints, int maxIterations)
 {
+  pcl::StopWatch watch;
   if ( !model->isEvaluated() )
   {
     ROS_ERROR("MultiResolutionSurfelRegistration::estimateTransformationLevenbergMarquardt: model map not evaluated");
@@ -746,6 +845,7 @@ bool MultiResolutionSurfelRegistration::estimateTransformationLevenbergMarquardt
   params.transform = &currentTransform;
   params.correspondences_source_points_ = correspondencesSourcePoints;
   params.correspondences_target_points_ = correspondencesTargetPoints;
+  params.distance_field_points_= distanceFieldPointsPoints;
   params.prior_prob = prior_prob_;
   params.sigma_size_factor = sigma_size_factor_;
   params.soft_assoc_c1 = soft_assoc_c1_;
@@ -919,8 +1019,9 @@ bool MultiResolutionSurfelRegistration::estimateTransformationLevenbergMarquardt
     qz = x(5);
     qw = params.lastWSign * sqrt(1.0 - qx * qx - qy * qy - qz * qz);
 
-    if (isnan(qw) || fabsf(qx) > 1.f || fabsf(qy) > 1.f || fabsf(qz) > 1.f)
+    if (std::isnan(qw) || fabsf(qx) > 1.f || fabsf(qy) > 1.f || fabsf(qz) > 1.f)
     {
+      // TODO
       return false;
     }
 
@@ -935,6 +1036,13 @@ bool MultiResolutionSurfelRegistration::estimateTransformationLevenbergMarquardt
     iter++;
   }
 
+  ROS_DEBUG_STREAM_NAMED("surfel_registration", "estimateTransformationLevenbergMarquardt took: " << watch.getTime() << " after " << iter << "iterations. prior_prob:" << prior_prob_
+    << " sigma_size_factor_: " << sigma_size_factor_ << " soft_assoc_c1: " << soft_assoc_c1_ 
+    << " soft_assoc_c2: " << soft_assoc_c2_ << " soft_assoc_c3: " <<  soft_assoc_c3_ 
+    << " assassociate_once_: " << associate_once_
+  );
+  if (iter == maxIterations)
+    ROS_WARN("estimateTransformationLevenbergMarquardt: maximum number of iterations reached");
   return retVal;
 }
 

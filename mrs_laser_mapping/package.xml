@@ -15,14 +15,13 @@
   <buildtool_depend>catkin</buildtool_depend>
 
   <depend>roscpp</depend>
+  <depend>nodelet</depend>
   <depend>sensor_msgs</depend>
   <depend>std_msgs</depend>
   <depend>tf</depend>
-  <depend>libpcl-all-dev</depend>
   <depend>pcl_ros</depend>
   <depend>laser_geometry</depend>
   <depend>geometry_msgs</depend>
-  <depend>nodelet</depend>
   <depend>nav_msgs</depend>
   <depend>visualization_msgs</depend>
   <depend>tf_conversions</depend>
@@ -31,10 +30,12 @@
   <depend>config_server</depend>
   <depend>cloud_compression</depend>
   <depend>eigen_conversions</depend>
+  <depend>libg2o</depend>
   <depend>mrs_laser_maps</depend>
 
   <build_export_depend>message_runtime</build_export_depend>
   
+
   <!-- The export tag contains other, unspecified, tags -->
   <export>
     <!-- You can specify that this package is a metapackage here: -->

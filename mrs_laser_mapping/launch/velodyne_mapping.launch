@@ -1,8 +1,10 @@
+<!--  -->
+
 <launch>
-  <arg name="scan_assembler_frame_id" default="/base_link"/>
-  <arg name="bagfile" default="/home/droeschel/bags/velodyne_kth/building_back_1.bag"/>
-  <arg name="bagfile_nsh" default="/home/droeschel/bags/nsh_indoor_outdoor.bag"/>
-  <arg name="rate" default="0.25"/>
+  <arg name="scan_assembler_frame_id" default="base_link"/>
+<!--   <arg name="bagfile" default="/home/droeschel/bags/velodyne_dji_016-11-08-16-57-12.bag"/> -->
+  <arg name="bagfile" default="/home/droeschel/bags/mbzirv_velodyne/velodyne_2016-11-23-15-32-59.bag"/>
+  <arg name="rate" default="0.1"/>
   <param name="/use_sim_time" value="true" />
 
   <node name="config_server" pkg="config_server" type="config_server" output="screen" required="false">
@@ -10,23 +12,75 @@
     <param name="robot_name" value="velodyne" />
   </node>
   
-  <node name="rviz_$(anon rviz)" pkg="rviz" type="rviz" args="-d $(find mrs_laser_mapping)/launch/velodyne_mapping.rviz" required="true" output="screen"/>
+  
+  <!-- declare arguments with default values -->
+  <arg name="pcap" default="" />
+  <arg name="calibration" default="$(find velodyne_pointcloud)/params/VLP16db.yaml"/>
+  <arg name="min_range" default="0.4" />
+  <arg name="max_range" default="130.0" />
+
+  <node pkg="nodelet" type="nodelet" name="velodyne_nodelet_manager"
+        args="manager" />
+  <arg name="read_once" default="false" />
+  <arg name="read_fast" default="false" />
+  <arg name="repeat_delay" default="0.0" />
+  
+  
+  <!-- start cloud nodelet -->
+  <!-- <include file="$(find velodyne_pointcloud)/launch/cloud_nodelet.launch">
+    <arg name="calibration" value="$(arg calibration)"/>
+    <arg name="min_range" value="$(arg min_range)"/>
+    <arg name="max_range" value="$(arg max_range)"/>
+  </include>-->
+
+  <arg name="frame_id" default="velodyne" />
+
+  <node pkg="nodelet" type="nodelet" name="transform_nodelet"
+        args="load velodyne_pointcloud/TransformNodelet velodyne_nodelet_manager" >
+    <param name="calibration" value="$(arg calibration)"/>
+    <param name="min_range" value="$(arg min_range)"/>
+    <param name="max_range" value="$(arg max_range)"/>
+    <param name="frame_id" value="$(arg frame_id)"/>
+  </node>
+
+  
+  <!-- self filter -->    
+  <node pkg="ais_laser_filters" type="cloud_to_cloud_filter_chain" output="screen" name="cloud_filters">
+    <remap from="~input" to="/velodyne_points" />
+    <remap from="~output" to="/velodyne_points_filtered" />
+    <param name="tf_message_filter_target_frame" type="string" value="base_link"/>
+    <rosparam command="load" file="$(find mrs_laser_mapping)/config/dji_velodyne_filter.yaml" />
+  </node>
+  
+  <node name="velodyne_object_detector" pkg="velodyne_object_detector" type="velodyne_object_detector" output="screen">
+    <param name="points_topic" value="/velodyne_points_filtered"/>
+
+    <param name="cluster_distance_threshold" value="1.0"/>
+    <param name="max_internal_distance" value="2.0"/>
+    <param name="cluster_radius_threshold" value="0.9"/> <!-- or 0.2-->
+    <param name="init_cluster_size" value="50"/>
+    <param name="min_cluster_radius" value="0.1"/>
+    <param name="max_cluster_radius" value="0.5"/>
+  </node>
+
+  
+<!--   <node name="rviz_$(anon rviz)" pkg="rviz" type="rviz" args="-d $(find mrs_laser_mapping)/launch/velodyne_mapping.rviz" required="true" output="screen"/> -->
 	
-	<node if="0" pkg="tf" name="static_laser_transform" type="static_transform_publisher" args="0 0 0 0 0 0 1 base_link velodyne 10" /> 
+	<node if="1" pkg="tf" name="static_laser_transform" type="static_transform_publisher" args="0 0 0 0 3.14 0 base_link velodyne 10" /> 
 	
-	<node if="1" pkg="rosbag" type="play" name="play" args="-r $(arg rate) --clock --start=0 -d 0 -u 20 $(arg bagfile)" output="screen" respawn="false" />
+	<node if="1" pkg="rosbag" type="play" name="play" args="-r $(arg rate) --clock --start=0 -d 0 $(arg bagfile)" output="screen" respawn="false" />
 
 	<node pkg="nodelet" type="nodelet" name="mapping_nodelet"  args="manager" output="screen"/>
 		
 	<!-- local mapping -->
-	<node if="1"  pkg="nodelet" type="nodelet" name="map_nodelet" args="load mrs_laser_mapping/map_nodelet mapping_nodelet" output="screen" >
+  <node launch-prefix=""  pkg="nodelet" type="nodelet" name="map_nodelet" args="standalone mrs_laser_mapping/map_nodelet " output="screen" >
 		<remap from="~input" to="/velodyne_points_crop" />
 	
 		<!-- frame id in which the scanlines are assembled -->
 		<param name="scan_assembler_frame_id" type="str" value="$(arg scan_assembler_frame_id)" />
 			
 		<!-- frame id of the sensor (for raytracing) -->
-		<param name="sensor_frame_id" type="str" value="/velodyne" />
+		<param name="sensor_frame_id" type="str" value="/base_link" />
 			
     <!-- first n scans are not registered to the map (e.g if robot is standing) -->
 	  <param name="min_scans_registration" type="int" value="2" />
@@ -44,16 +98,18 @@
 		<param name="registration_soft_assoc_c2" type="int" value="10" />
 		<param name="registration_sigma_size_factor" type="double" value="0.45" /> 
 
-		<!-- parameters for the local map -->
-    <param name="map_size" type="int" value="128" />
+<!-- parameters for the local map -->
+    <param name="map_size" type="int" value="256" />
     <param name="map_resolution" type="double" value="16.0" />
-    <param name="map_levels" type="int" value="4" />
-    <param name="map_cell_capacity" type="int" value="2500" />
-
+    <param name="map_levels" type="int" value="6" />
+    <param name="map_cell_capacity" type="int" value="10000" />
+    
+    <param name="scan_window_local_map" type="int" value="5" />
+    
     <!-- parameters for downsampled map (for visualization) -->
-    <param name="map_downsampled_size" type="int" value="8" />
+    <param name="map_downsampled_size" type="int" value="256" />
     <param name="map_downsampled_resolution" type="double" value="20.0" />
-    <param name="map_downsampled_levels" type="int" value="4" />
+    <param name="map_downsampled_levels" type="int" value="6" />
     <param name="map_downsampled_cell_capacity" type="int" value="100" />
 		
 		<!-- add scans when troso is rotated. Set to false if torso rotation results in artifacts. Default: true-->
@@ -61,6 +117,22 @@
 		
 		<param name="decrease_rate" type="double" value="0.0" />
 	</node>
+	
+
+  
+<group if="0">  
+    <node pkg="nodelet" type="nodelet" name="slam_visualizer_nodelet" args="load mrs_laser_mapping/slam_visualizer_nodelet mapping_nodelet" output="screen" >
+      <remap from="~keyframe_transforms" to="/mapping_nodelet/keyframe_transforms" />
+      <remap from="~keyframes" to="/mapping_nodelet/keyframes" />
+      <param name="voxel_leaf_size"                                               type="double"   value="0.25" />
+      <param name="filter_limit_min_z" type="double" value="-40.0" /> 	      
+      <param name="filter_limit_max_z" type="double" value="40.0" /> 	      
+      <param name="filter_limit_min_x" type="double" value="-40.0" /> 	      
+      <param name="filter_limit_max_x" type="double" value="40.0" /> 	      
+      <param name="filter_limit_min_y" type="double" value="-40.0" /> 	      
+      <param name="filter_limit_max_y" type="double" value="40.0" /> 	 
+      <param name="file_name_prefix" type="string" value="visualizer_map_nodelet" /> 	 
+    </node>
 	
   <!-- Run a passthrough filter to cut ceiling -->
   <node pkg="nodelet" type="nodelet" name="passthrough" args="load pcl/PassThrough mapping_nodelet" output="screen">
@@ -73,14 +145,14 @@
       filter_limit_negative: False
     </rosparam>
   </node>
-  
+ </group>
   <!-- Run a passthrough filter to cut ceiling -->
   <node pkg="nodelet" type="nodelet" name="cropbox" args="load pcl/CropBox mapping_nodelet" output="screen">
     <remap from="~input" to="/velodyne_points" />
     <remap from="~output" to="/velodyne_points_crop" />
     <rosparam>
-      min_x: -2.0
-      max_x: 2.0
+      min_x: -1.0
+      max_x: 1.0
       min_y: -1.0
       max_y: 1.0
       min_z: -1.0

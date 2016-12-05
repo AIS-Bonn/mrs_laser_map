@@ -1,0 +1,23 @@
+cloud_filter_chain:
+#- type: ais_laser_filters/PointCloudJumpEdgeFilter
+  #name: jumpedge_filter
+  #params:
+    #sensor_frame: laser_scanner_center
+    #min_angle: 32.0
+    #max_angle: 148.0
+    #neighbors: 3
+    #window: 5
+    #max_filter_radius: 1.5
+    #angle_increment: 0.4
+- type: ais_laser_filters/PointCloudSelfFilterTf
+  name: self_filter_tf
+  params:
+    filter_min_x: -0.65
+    filter_max_x: 0.6
+    filter_min_y: -0.55
+    filter_max_y: 0.55
+    filter_min_z: -0.4
+    filter_max_z: 0.5
+    filter_links: [left_arm_hand_link,right_arm_hand_link,left_arm_elbow_pitch_link,right_arm_elbow_pitch_link]
+    link_radius: 0.6
+    filter_radius: 1.0

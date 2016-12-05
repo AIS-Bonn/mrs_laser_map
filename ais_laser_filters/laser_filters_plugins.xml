@@ -1,0 +1,41 @@
+<class_libraries>
+  <library path="lib/libmod_laser_scan_filters">
+    <class name="mod_laser_filters/ScanShadowsFilter" type="mod_laser_filters::ScanShadowsFilter" 
+      base_class_type="filters::FilterBase<sensor_msgs::LaserScan>">
+      <description>
+        This is a filter which filters points from a laser scan that look like the veiling effect.
+      </description>
+    </class>
+    <class name="mod_laser_filters/ScanSelfShadowsFilter" type="mod_laser_filters::ScanSelfShadowsFilter" 
+      base_class_type="filters::FilterBase<sensor_msgs::LaserScan>">
+      <description>
+        This is a filter which filters points from a laser scan that look like the veiling effect.
+      </description>
+    </class>
+    <class name="mod_laser_filters/ApproxSelfFilter" type="mod_laser_filters::ApproxSelfFilter" 
+      base_class_type="filters::FilterBase<sensor_msgs::LaserScan>">
+      <description>
+        This is a filter which filters points on the robot (in a cylinder around the robot).
+      </description>
+    </class>
+  </library>
+  <library path="lib/libais_pointcloud_filters">
+    <class name="ais_laser_filters/PointCloudFootprintFilter" type="ais_laser_filters::PointCloudFootprintFilter" 
+	    base_class_type="filters::FilterBase<sensor_msgs::PointCloud2>">
+      <description>
+	Remove points from the pointcloud inside the robot base. 
+      </description>
+    </class>
+    <class name="ais_laser_filters/PointCloudJumpEdgeFilter" type="ais_laser_filters::PointCloudJumpEdgeFilter" 
+	    base_class_type="filters::FilterBase<sensor_msgs::PointCloud2>">
+      <description>
+	Remove jump edges from the pointcloud in a given radius. 
+      </description>
+    </class>
+    <class name="ais_laser_filters/PointCloudSelfFilterTf" type="ais_laser_filters::PointCloudSelfFilterTf" 
+	    base_class_type="filters::FilterBase<sensor_msgs::PointCloud2>">
+      <description>
+      </description>
+    </class>
+  </library>
+</class_libraries>

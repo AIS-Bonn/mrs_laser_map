@@ -38,6 +38,7 @@
 #define _SURFELMAP_PUBLISHER_IMPL_H_
 
 #include <mrs_laser_mapping/surfelmap_publisher.h>
+#include <visualization_msgs/MarkerArray.h>
 
 namespace mrs_laser_mapping
 {
@@ -46,7 +47,9 @@ namespace mrs_laser_mapping
 
 SurfelMapPublisher::SurfelMapPublisher() : m_nodeHandle("~"), m_lastSurfelMarkerCount(0)
 {
-  m_markerPublisher = m_nodeHandle.advertise<visualization_msgs::Marker>("surfels", 100);
+//   m_markerPublisher = m_nodeHandle.advertise<visualization_msgs::Marker>("surfels", 100);
+  m_markerPublisher = m_nodeHandle.advertise<visualization_msgs::MarkerArray>("surfels", 100);
+
   m_pointCloudPublisher = m_nodeHandle.advertise<pcl::PointCloud<pcl::PointXYZ>>("pointcloud", 10);
   m_pointCloudDownsampledPublisher =
   m_nodeHandle.advertise<pcl::PointCloud<pcl::PointXYZ>>("pointcloud_downsampled", 10);
@@ -188,21 +191,9 @@ void SurfelMapPublisher::publishSurfelMarkers(const boost::shared_ptr<MapType>& 
   std::vector<std::vector<pcl::PointXYZ>> occupiedCellsCenters;
 
   int levels = map->getLevels();
-  for (unsigned int i = 0; i < m_lastSurfelMarkerCount; ++i)
-  {
-    for (unsigned int l = 0; l < levels; l++)
-    {
-      visualization_msgs::Marker marker;
-      marker.header.frame_id = map->getFrameId();
-      marker.header.stamp = map->getLastUpdateTimestamp();
-      marker.ns = boost::lexical_cast<std::string>(l);
-      marker.id = i;
-      marker.type = marker.SPHERE;
-      marker.action = marker.DELETE;
-      m_markerPublisher.publish(marker);
-    }
-  }
 
+  visualization_msgs::MarkerArray marker_array; 
+  
   for (unsigned int l = 0; l < levels; l++)
   {
     cellSizes.push_back(map->getCellSize(l));
@@ -251,7 +242,8 @@ void SurfelMapPublisher::publishSurfelMarkers(const boost::shared_ptr<MapType>& 
       visualization_msgs::Marker marker;
       marker.header.frame_id = map->getFrameId();
       marker.header.stamp = map->getLastUpdateTimestamp();
-      marker.ns = boost::lexical_cast<std::string>(l);
+//       marker.ns = boost::lexical_cast<std::string>(l);
+      marker.ns = "surfel markers";
       marker.id = markerId++;
       marker.type = marker.SPHERE;
       marker.action = marker.ADD;
@@ -276,9 +268,28 @@ void SurfelMapPublisher::publishSurfelMarkers(const boost::shared_ptr<MapType>& 
       marker.color.g = ColorMapJet::green(angle_normalized);
       marker.color.b = ColorMapJet::blue(angle_normalized);
 
-      m_markerPublisher.publish(marker);
+      marker_array.markers.push_back(marker);
     }
   }
+  
+  for (unsigned int i = (cellSizes.size()-1); i < m_lastSurfelMarkerCount; ++i)
+  {
+    for (unsigned int l = 0; l < levels; l++)
+    {
+      visualization_msgs::Marker marker;
+      marker.header.frame_id = map->getFrameId();
+      marker.header.stamp = map->getLastUpdateTimestamp();
+      marker.ns = boost::lexical_cast<std::string>(l);
+      marker.id = i;
+      marker.type = marker.SPHERE;
+      marker.action = marker.DELETE;
+      marker_array.markers.push_back(marker);
+
+    }
+  }
+  m_markerPublisher.publish(marker_array);
+
+  ROS_INFO_STREAM("published " << m_lastSurfelMarkerCount << " markers");
   m_lastSurfelMarkerCount = markerId;
 }
 }

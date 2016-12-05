@@ -46,7 +46,7 @@
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/filters/statistical_outlier_removal.h>
 #include <pcl/features/normal_3d.h>
-
+#include <pcl/io/pcd_io.h>
 #include <eigen_conversions/eigen_msg.h>
 
 #include <pluginlib/class_list_macros.h>
@@ -141,6 +141,9 @@ void SlamVisualizerNodelet::onInit()
   ph.param("filter_limit_max_y", filter_limit_max_y_, 8.f);
   ph.param("filter_limit_min_z", filter_limit_min_z_, -8.f);
   ph.param("filter_limit_max_z", filter_limit_max_z_, 8.f);
+  
+  ros::param::param<string>("file_name_prefix", file_name_prefix_, "visualizer");
+
 
   process_keyframe_thread_ = boost::shared_ptr<boost::thread>(
       new boost::thread(boost::bind(&SlamVisualizerNodelet::processKeyframeQueue, this)));
@@ -157,7 +160,7 @@ void SlamVisualizerNodelet::receivedKeyFrame(const mrs_laser_mapping::KeyFrameCo
 
 void SlamVisualizerNodelet::receivedKeyFrameTransforms(const mrs_laser_mapping::KeyFrameTransformsConstPtr& msg)
 {
-  NODELET_DEBUG_STREAM("received map from timestamp " << msg->header.stamp << " at time " << ros::Time::now());
+  NODELET_DEBUG_STREAM("received transforms from timestamp " << msg->header.stamp << " at time " << ros::Time::now());
   mrs_laser_mapping::KeyFrameTransformsPtr keyframeTransform(new mrs_laser_mapping::KeyFrameTransforms(*msg));
   keyframe_transform_buffer_.push_front(keyframeTransform);
 }
@@ -194,6 +197,8 @@ void SlamVisualizerNodelet::processKeyframeTransformQueue()
 
 void SlamVisualizerNodelet::processKeyFrame(const mrs_laser_mapping::KeyFrameConstPtr& msg)
 {
+  pcl::StopWatch watch; 
+  
   if (msg->runID != run_id_)
   {
     NODELET_INFO("SlamVisualizerNodelet: Clearing keyframes");
@@ -204,9 +209,13 @@ void SlamVisualizerNodelet::processKeyFrame(const mrs_laser_mapping::KeyFrameCon
   }
 
   PointCloud::Ptr key_frame_cloud(new PointCloud);
-  VectorStream stream(&msg->compressedCloud);
-  compression_->decodePointCloud(stream, key_frame_cloud);
+//   VectorStream stream(&msg->compressedCloud);
+//   compression_->decodePointCloud(stream, key_frame_cloud);
+  
+  pcl::fromROSMsg(msg->uncompressed_cloud, *key_frame_cloud);
 
+
+  
   PointCloud::Ptr key_frame_cloud_downsampled(new PointCloud);
 
   pcl::VoxelGrid<PointType> voxel_grid_filter;
@@ -233,20 +242,20 @@ void SlamVisualizerNodelet::processKeyFrame(const mrs_laser_mapping::KeyFrameCon
   // pass.setFilterLimitsNegative (true);
   pass.filter(*key_frame_cloud_downsampled);
 
-  pcl::StatisticalOutlierRemoval<PointType> sor;
-  sor.setInputCloud(key_frame_cloud_downsampled);
-  sor.setMeanK(50);
-  sor.setStddevMulThresh(1.0);
-  sor.filter(*key_frame_cloud_downsampled);
+//   pcl::StatisticalOutlierRemoval<PointType> sor;
+//   sor.setInputCloud(key_frame_cloud_downsampled);
+//   sor.setMeanK(50);
+//   sor.setStddevMulThresh(1.5);
+//   sor.filter(*key_frame_cloud_downsampled);
 
   pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr key_frame_cloud_downsampled_normals(
       new pcl::PointCloud<pcl::PointXYZRGBNormal>);
-  pcl::copyPointCloud(*key_frame_cloud_downsampled, *key_frame_cloud_downsampled_normals);
-
-  pcl::NormalEstimation<PointType, pcl::PointXYZRGBNormal> ne;
-  ne.setInputCloud(key_frame_cloud_downsampled);
-  ne.setRadiusSearch(0.25);
-  ne.compute(*key_frame_cloud_downsampled_normals);
+//   pcl::copyPointCloud(*key_frame_cloud_downsampled, *key_frame_cloud_downsampled_normals);
+// 
+//   pcl::NormalEstimation<PointType, pcl::PointXYZRGBNormal> ne;
+//   ne.setInputCloud(key_frame_cloud_downsampled);
+//   ne.setRadiusSearch(0.25);
+//   ne.compute(*key_frame_cloud_downsampled_normals);
 
   // update members here to keep lock short
   {
@@ -272,6 +281,31 @@ void SlamVisualizerNodelet::processKeyFrame(const mrs_laser_mapping::KeyFrameCon
     min_z_ = std::min(key_frame_cloud_downsampled->points[i].z, min_z_);
     max_z_ = std::max(key_frame_cloud_downsampled->points[i].z, max_z_);
   }
+  
+  PointCloud::Ptr map_alloc_cloud( new PointCloud() );
+	
+  for (unsigned int i = 0; i < key_frame_clouds_downsampled_.size(); i++)
+  {
+
+    PointCloudPtr transformed_cloud_downsampled = PointCloudPtr(new PointCloud());
+    pcl::transformPointCloud(*key_frame_clouds_downsampled_[i], *transformed_cloud_downsampled,
+                             keyframe_transforms_[i].cast<float>());
+    
+    (*map_alloc_cloud)+=*transformed_cloud_downsampled;
+    std::stringstream name;
+    
+    name <<  "/tmp/" << file_name_prefix_ << "_graph_node_" << i << ".pcd";
+    pcl::io::savePCDFile(name.str(), *transformed_cloud_downsampled);    
+  
+  }
+  
+  std::stringstream name;
+  name << "/tmp/" << file_name_prefix_ << "_full_graph.pcd" ;
+  pcl::io::savePCDFile(name.str(), *map_alloc_cloud);    
+  
+
+  
+  NODELET_DEBUG_STREAM("processKeyFrame took: " << watch.getTime());
 }
 
 void SlamVisualizerNodelet::processKeyFrameTransforms(const mrs_laser_mapping::KeyFrameTransformsConstPtr& msg)
@@ -443,10 +477,10 @@ void SlamVisualizerNodelet::processKeyFrameTransforms(const mrs_laser_mapping::K
   points.type = visualization_msgs::Marker::POINTS;
   line_list.type = visualization_msgs::Marker::LINE_LIST;
 
-  points.scale.x = 0.1;
-  points.scale.y = 0.1;
+  points.scale.x = 0.25;
+  points.scale.y = 0.25;
 
-  line_list.scale.x = 0.05;
+  line_list.scale.x = 0.1;
 
   points.color.r = 1.0f;
   points.color.g = 1.f;

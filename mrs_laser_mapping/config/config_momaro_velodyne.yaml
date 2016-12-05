@@ -1,0 +1,40 @@
+mapping_nodelet:
+  assemble_half_scans: 1
+  median_filter: 1
+  occ_clamping_thresh_max: 3.5
+  occ_clamping_thresh_min: -2
+  occ_prob_hit: 0.85
+  occ_prob_miss: -0.41
+  occ_update: 0
+  shadow_filter_cutoff: 1.5
+  show_self_filter_markers: 0
+  torso_cutoff_max_x: 0.65
+  torso_cutoff_max_y: 0.65
+  torso_cutoff_min_x: -0.65
+  torso_cutoff_min_y: -0.65
+  refine_local_map: 0
+  refine_graph: 0
+  clear_dynamics_in_graph: 0
+  map_roll: -0.045
+  map_pitch: 0.025
+  
+map_nodelet:
+  assemble_half_scans: 1
+  median_filter: 1
+  occ_clamping_thresh_max: 3.5
+  occ_clamping_thresh_min: -2
+  occ_prob_hit: 0.85
+  occ_prob_miss: -0.41
+  occ_update: 0
+  shadow_filter_cutoff: 1.5
+  show_self_filter_markers: 0
+  torso_cutoff_max_x: 0.65
+  torso_cutoff_max_y: 0.65
+  torso_cutoff_min_x: -0.65
+  torso_cutoff_min_y: -0.65
+  refine_local_map: 0
+  refine_graph: 0
+  clear_dynamics_in_graph: 0
+  map_frame_x: -10.0
+  map_frame_y: -10.0
+  

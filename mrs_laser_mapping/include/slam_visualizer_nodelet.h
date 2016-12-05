@@ -58,7 +58,7 @@
 #include <visualization_msgs/Marker.h>
 
 #include <std_srvs/Empty.h>
-#include <mrs_laser_mapping/MultiResolutionMap.h>
+#include <mrs_laser_mapping/MultiResolutionMapMsg.h>
 #include <mrs_laser_mapping/KeyFrame.h>
 #include <mrs_laser_mapping/KeyFrameTransforms.h>
 
@@ -185,6 +185,8 @@ private:
   boost::shared_ptr<boost::thread> process_keyframe_transform_thread_;
 
   boost::mutex keyframe_mutex_;
+  
+  std::string file_name_prefix_;
 };
 }
 

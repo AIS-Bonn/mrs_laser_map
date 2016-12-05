@@ -1,0 +1,77 @@
+<!--  -->
+<launch>
+<!--   <arg name="bagfile" default="/home/droeschel/bags/centauro/hof_run1/2016-10-29-15-41-03_filtered.bag"/> -->
+  <arg name="bagfile" default="/home/droeschel/bags/centauro/2016-10-29-17-26-29_filtered.bag"/>
+<!--   <arg name="bagfile" default="/home/droeschel/bags/centauro/hof_run1/2016-10-29-18-27-44_filtered.bag"/> -->
+<!--   <arg name="bagfile" default="/home/droeschel/bags/centauro/hof_run1/2016-10-29-19-25-20.b_filtered.bag"/> -->
+  <arg name="rate" default="1.0"/>
+  
+  <param name="/use_sim_time" value="true" />
+
+  
+  <node pkg="rosbag" type="play" name="play" args="-r $(arg rate) -k -s 0 --clock $(arg bagfile)" output="screen" respawn="false" />
+  
+  <node name="config_server" pkg="config_server" type="config_server" output="screen" required="false">
+    <param name="config_path" value="$(find mrs_laser_mapping)/config" />
+    <param name="robot_name" value="momaro_velodyne" />
+  </node>
+  
+
+  
+  <param name="robot_description_laser" textfile="$(find momaro_laser_rotator)/config/velodyne_courtyard.xml" />
+
+  <node pkg="robot_state_publisher" type="state_publisher" name="rob_st_pub" >
+	  <remap from="robot_description" to="robot_description_laser" />
+	  <remap from="/joint_states" to="/3dls_joint_states" />
+  </node>
+  
+  <!-- declare arguments with default values -->
+  <arg name="pcap" default="" />
+  <arg name="calibration" default="$(find velodyne_pointcloud)/params/VLP16db.yaml"/>
+  <arg name="min_range" default="0.4" />
+  <arg name="max_range" default="130.0" />
+
+  <node pkg="nodelet" type="nodelet" name="velodyne_nodelet_manager"
+        args="manager" output="screen" />
+  <arg name="read_once" default="false" />
+  <arg name="read_fast" default="false" />
+  <arg name="repeat_delay" default="0.0" />
+  
+  
+  <!-- start cloud nodelet -->
+  <!--<include file="$(find velodyne_pointcloud)/launch/cloud_nodelet.launch">
+    <arg name="calibration" value="$(arg calibration)"/>
+    <arg name="min_range" value="$(arg min_range)"/>
+    <arg name="max_range" value="$(arg max_range)"/>
+  </include>-->
+
+  <arg name="frame_id" default="odom" />
+
+  <node pkg="nodelet" type="nodelet" name="transform_nodelet"
+        args="load velodyne_pointcloud/TransformNodelet velodyne_nodelet_manager"  output="screen">
+    <param name="calibration" value="$(arg calibration)"/>
+    <param name="min_range" value="$(arg min_range)"/>
+    <param name="max_range" value="$(arg max_range)"/>
+    <param name="frame_id" value="$(arg frame_id)"/>
+  </node>
+  <!--
+  <node pkg="robot_self_filter" type="self_filter" respawn="true" name="laser_self_filter" output="screen" machine="c2">
+     <remap from="cloud_in" to="/tilt_scan_cloud" />
+     <remap from="cloud_out" to="/tilt_scan_cloud_filtered2" />
+     <param name="sensor_frame" type="string" value="laser_tilt_link" />        
+     <param name="subsample_value" type="double" value=".01"/>
+     <rosparam command="load" file="$(find pr2_arm_navigation_perception)/config/self_filter_$(arg arm_config).yaml" />
+</node>
+-->
+<include file="$(find momaro_model)/launch/model.launch">
+		<arg name="spine_height" value="0.22" />
+	</include>
+  
+  <include file="$(find mrs_laser_mapping)/launch/momaro_velodyne_mapping.launch">
+  
+    <arg name="build_alloc_map" value="false"/>
+  </include>
+  
+  
+</launch>
+		

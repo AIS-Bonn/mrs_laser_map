@@ -221,21 +221,21 @@ void MapPublisher::publishCellsWithOccupancy(const boost::shared_ptr<MapType>& m
 }
 
 template <typename PointType, typename MapType>
-void MapPublisher::publishMap(const boost::shared_ptr<MapType>& map)
+void MapPublisher::publishMap(const boost::shared_ptr<MapType>& map, bool distorted)
 {
   if (pub_map_msg_.getNumSubscribers() == 0)
     return;
   pcl::StopWatch timer;
   timer.reset();
 
-  mrs_laser_mapping::MultiResolutionMapPtr map_msg(new mrs_laser_mapping::MultiResolutionMap);
+  mrs_laser_mapping::MultiResolutionMapMsgPtr map_msg(new mrs_laser_mapping::MultiResolutionMapMsg);
   map_msg->header.stamp = map->getLastUpdateTimestamp();
   map_msg->header.frame_id = map->getFrameId();
   map_msg->levels = map->getLevels();
   map_msg->size_in_meters = map->getSizeInMeters();
   map_msg->resolution = map->getResolution();
   map_msg->cell_capacity = map->getCellCapacity();
-
+  map_msg->distorted = distorted;
   unsigned int nr_points = 0;
   for (unsigned int i = 0; i < map->getLevels(); i++)
   {
@@ -287,81 +287,81 @@ void MapPublisher::publishMap(const boost::shared_ptr<MapType>& map)
       }
     }
   }
-
+  
   pub_map_msg_.publish(map_msg);
-  ROS_DEBUG_STREAM_NAMED("map_publisher","published map message took: " << timer.getTime() << " ms with " << nr_points
-                                                 << " points. from timestamp " << map_msg->header.stamp << " at time "
+  ROS_DEBUG_STREAM_NAMED("map","published map message took: " << timer.getTime() << " ms with " << nr_points
+                                                 << " points and " << map_msg->levels << " levels. from timestamp " << map_msg->header.stamp << " at time "
                                                  << ros::Time::now());
 }
 
 template <typename PointType, typename MapType>
 void MapPublisher::publishMapLevelColor(const boost::shared_ptr<MapType>& map)
 {
-  if (pub_cloud_level_color_.getNumSubscribers() == 0)
-    return;
-
-  typename pcl::PointCloud<pcl::PointXYZRGB>::Ptr cellPointsCloud(new pcl::PointCloud<pcl::PointXYZRGB>());
-  for (size_t l = 0; l < map->getLevels(); ++l)
-  {
-    double levelNumberNormalized = (static_cast<double>(l + 1) / map->getLevels());
-
-    typename pcl::PointCloud<PointType>::Ptr levelPointsCloud(new pcl::PointCloud<PointType>());
-    map->getCellPoints(levelPointsCloud, l);
-
-    float r, g, b;
-    ColorMapJet::getRainbowColor(levelNumberNormalized, r, g, b);
-
-    for (size_t i = 0; i < levelPointsCloud->points.size(); ++i)
-    {
-      pcl::PointXYZRGB p;
-      p.x = levelPointsCloud->points[i].x;
-      p.y = levelPointsCloud->points[i].y;
-      p.z = levelPointsCloud->points[i].z;
-
-      p.r = static_cast<int>(255.f * r);
-      p.g = static_cast<int>(255.f * g);
-      p.b = static_cast<int>(255.f * b);
-
-      cellPointsCloud->points.push_back(p);
-    }
-  }
-
-  cellPointsCloud->header.frame_id = map->getFrameId();
-  cellPointsCloud->header.stamp = pcl_conversions::toPCL(map->getLastUpdateTimestamp());
-  pub_cloud_level_color_.publish(cellPointsCloud);
+//   if (pub_cloud_level_color_.getNumSubscribers() == 0)
+//     return;
+// 
+//   typename pcl::PointCloud<pcl::PointXYZRGB>::Ptr cellPointsCloud(new pcl::PointCloud<pcl::PointXYZRGB>());
+//   for (size_t l = 0; l < map->getLevels(); ++l)
+//   {
+//     double levelNumberNormalized = (static_cast<double>(l + 1) / map->getLevels());
+// 
+//     typename pcl::PointCloud<PointType>::Ptr levelPointsCloud(new pcl::PointCloud<PointType>());
+//     map->getCellPoints(levelPointsCloud, l);
+// 
+//     float r, g, b;
+//     ColorMapJet::getRainbowColor(levelNumberNormalized, r, g, b);
+// 
+//     for (size_t i = 0; i < levelPointsCloud->points.size(); ++i)
+//     {
+//       pcl::PointXYZRGB p;
+//       p.x = levelPointsCloud->points[i].x;
+//       p.y = levelPointsCloud->points[i].y;
+//       p.z = levelPointsCloud->points[i].z;
+// 
+//       p.r = static_cast<int>(255.f * r);
+//       p.g = static_cast<int>(255.f * g);
+//       p.b = static_cast<int>(255.f * b);
+// 
+//       cellPointsCloud->points.push_back(p);
+//     }
+//   }
+// 
+//   cellPointsCloud->header.frame_id = map->getFrameId();
+//   cellPointsCloud->header.stamp = pcl_conversions::toPCL(map->getLastUpdateTimestamp());
+//   pub_cloud_level_color_.publish(cellPointsCloud);
 }
 
 
 template <typename PointType, typename MapType>
 void MapPublisher::publishMapScanColor(const boost::shared_ptr<MapType>& map)
 {
-  if (pub_cloud_scan_color_.getNumSubscribers() == 0)
-    return;
-
-  pcl::PointCloud<PointXYZRGBScanLabel>::Ptr cloud_map(new pcl::PointCloud<PointXYZRGBScanLabel>());
-  pcl::StopWatch watch;
-  
-  map->getCellPoints(cloud_map);
-
-//   ROS_INFO_STREAM("get all cvellpoints took: " << watch.getTime());
-  pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_pub(new pcl::PointCloud<pcl::PointXYZRGB>());
-  pcl::copyPointCloud(*cloud_map, *cloud_pub);
-  
-  
-  for (size_t i = 0; i < cloud_map->size(); ++i)
-  {
-    double scan_number_normalized = fmod((static_cast<double>(cloud_map->points[i].scanNr) / 100.0), 1.0);
-    float r, g, b;
-    ColorMapJet::getRainbowColor(scan_number_normalized, r, g, b);
-  
-    cloud_pub->points[i].r = static_cast<int>(255.f * r);
-    cloud_pub->points[i].g = static_cast<int>(255.f * g);
-    cloud_pub->points[i].b = static_cast<int>(255.f * b);
-  }
-  
-  cloud_pub->header.frame_id = map->getFrameId();
-  cloud_pub->header.stamp = pcl_conversions::toPCL(map->getLastUpdateTimestamp());
-  pub_cloud_scan_color_.publish(cloud_pub);
+//   if (pub_cloud_scan_color_.getNumSubscribers() == 0)
+//     return;
+// 
+//   typename pcl::PointCloud<PointType>::Ptr cloud_map(new pcl::PointCloud<PointType>());
+//   pcl::StopWatch watch;
+//   
+//   map->getCellPoints(cloud_map);
+// 
+// //   ROS_INFO_STREAM("get all cvellpoints took: " << watch.getTime());
+//   pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_pub(new pcl::PointCloud<pcl::PointXYZRGB>());
+//   pcl::copyPointCloud(*cloud_map, *cloud_pub);
+//   
+//   
+//   for (size_t i = 0; i < cloud_map->size(); ++i)
+//   {
+//     double scan_number_normalized = fmod((static_cast<double>(cloud_map->points[i].scanNr) / 20.0), 1.0);
+//     float r, g, b;
+//     ColorMapJet::getRainbowColor(scan_number_normalized, r, g, b);
+//   
+//     cloud_pub->points[i].r = static_cast<int>(255.f * r);
+//     cloud_pub->points[i].g = static_cast<int>(255.f * g);
+//     cloud_pub->points[i].b = static_cast<int>(255.f * b);
+//   }
+//   
+//   cloud_pub->header.frame_id = map->getFrameId();
+//   cloud_pub->header.stamp = pcl_conversions::toPCL(map->getLastUpdateTimestamp());
+//   pub_cloud_scan_color_.publish(cloud_pub);
 
 }
 

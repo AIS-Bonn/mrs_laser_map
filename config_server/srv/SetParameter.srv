@@ -1,5 +1,0 @@
-string name
-string value
-string no_notify
----
-bool badValue

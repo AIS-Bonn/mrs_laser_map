@@ -37,6 +37,10 @@ add_definitions(${PCL_DEFINITIONS})
 find_package(Boost REQUIRED COMPONENTS program_options thread system signals regex filesystem) 
 include_directories(${Boost_INCLUDE_DIRS}) 
 
+# TBB required
+find_package(TBB REQUIRED)
+include_directories(${TBB_INCLUDE_DIRS})
+
 set (${PROJECT_NAME}_SRCS
   src/map_multiresolution.cpp
   src/multiresolution_surfel_registration.cpp
@@ -45,3 +49,9 @@ set (${PROJECT_NAME}_SRCS
 add_library(${PROJECT_NAME} ${${PROJECT_NAME}_SRCS} )
 target_link_libraries(${PROJECT_NAME} ${TBB_LIBRARIES} ${Boost_LIBRARIES} ${catkin_LIBRARIES})
 
+# if(CATKIN_ENABLE_TESTING)
+#   catkin_add_gtest(${PROJECT_NAME}_map_test tests/map_test.cpp)
+#   catkin_add_gtest(${PROJECT_NAME}_interface_test tests/interface_test.cpp)
+#   target_link_libraries(${PROJECT_NAME}_map_test ${catkin_LIBRARIES})
+#   target_link_libraries(${PROJECT_NAME}_interface_test ${catkin_LIBRARIES})
+# endif()

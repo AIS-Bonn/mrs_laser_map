@@ -1,0 +1,192 @@
+<launch>
+	<arg name="arms" default="true" />
+
+
+        <include file="$(find spacebot_launch)/config/model.launch" />
+
+        
+	<arg name="robot" default="momaro" />
+
+	<node name="config_server" pkg="config_server" type="config_server" output="screen" required="false">
+		<param name="config_path" value="$(find spacebot_launch)/config" />
+		<param name="robot_name" value="$(arg robot)" />
+	</node>
+
+
+        
+
+  	<param name="/use_sim_time" value="true" />
+  	<!-- Transform /joint_states into /tf -->
+        <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher" output="screen">
+        </node>
+
+<!--	<node pkg="tf" name="static_laser_transform" type="static_transform_publisher" args="0 0 0 0 0 0 1 base_link upperbody_link 10" />--> 
+
+	<!-- ========= The Bagplayer ========== -->    
+	<!-- arg name="bagname" default="/data/centauro_data/laser_reg_testb.bag"/ -->
+	<arg name="bagname_quali" default="/data/bags/spacebot_run1__robot_2015-09-10-13-28-33_b.bag"/>
+	<arg name="bagname_spacebot_camp1" default="/data/bags/robot_2015-11-13-15-48-52_cut.bag"/>
+		<arg name="hall" default="/data/bags/hall_mission_b.bag"/>
+
+	<arg name="bagname_sb_2" default="/data/bags/spacebotcamp_day2b.bag"/>
+	<arg name="bagname_sb_1" default="/data/bags/robot_2015-11-12-08-28-22_b.bag"/>
+	<arg name="bagname_sb_3" default="/data/bags/spacebotcamp_day2c.bag"/>
+	<arg name="drc_1" default="/data/bags/drc_run1_filtered.bag"/>
+	<!-- arg name="bagname" default="/data/bags/drc/drc_testbed_on_terrain2.bag"/--> 
+	<!-- arg name="bagname" default="/data/bags/drc/drc_testbed_debris_pushing2.bag"/ -->
+<!--	<arg name="bagname" value="/home/razlaw/Downloads/laser_scan.bag"/>  -->
+	<arg name="rate" default="1.0"/>
+	
+	<node if="0" pkg="rosbag" type="play" name="play" args="-r $(arg rate) --clock --start=373 $(arg bagname_spacebot_camp1)" output="screen" respawn="false" >
+		<!--<remap from="/tf" to="/tf_frombag" /> bis ca. 1400	373; 100: losfahren -->		
+	</node>
+	<node if="0" pkg="rosbag" type="play" name="play" args="-r $(arg rate) --clock --start=226  $(arg bagname_sb_2)" output="screen" respawn="false" >
+		<!--<remap from="/tf" to="/tf_frombag" />	-->		
+	</node>
+	<node if="0" pkg="rosbag" type="play" name="play" args="-r $(arg rate) --clock --start=530  $(arg bagname_quali)" output="screen" respawn="false" />
+	<node if="0" pkg="rosbag" type="play" name="play" args="-r $(arg rate) --clock --start=1500  $(arg bagname_sb_1)" output="screen" respawn="false" />
+	<node if="0" pkg="rosbag" type="play" name="play" args="-r $(arg rate) --clock --start=80  $(arg bagname_sb_3)" output="screen" respawn="false" />
+	<node if="0" pkg="rosbag" type="play" name="play" args="-r $(arg rate) --clock --start=3550  $(arg hall)" output="screen" respawn="false" />
+	<!-- car -->
+	<node if="0" pkg="rosbag" type="play" name="play" args="-r $(arg rate) --clock --start=1100  $(arg drc_1)" output="screen" respawn="false" />
+	<!-- valve -->
+	<node if="0" pkg="rosbag" type="play" name="play" args="-r $(arg rate) --clock --start=1530  $(arg drc_1)" output="screen" respawn="false" />
+	<!-- door -->
+	<node if="0" pkg="rosbag" type="play" name="play" args="-r $(arg rate) --clock --start=1395  $(arg drc_1)" output="screen" respawn="false" />
+	<!-- debris -->
+	<node if="1" pkg="rosbag" type="play" name="play" args="-r $(arg rate) --clock --start=2030  $(arg drc_1)" output="screen" respawn="false" />
+	<!-- =================================== -->
+
+<!-- Mapping -->
+	<!-- ========= Nodeletmanager ========= -->
+	<node pkg="nodelet" type="nodelet" name="mapping_nodelet"  args="manager" output="screen">
+		<param name="num_worker_threads" value="200"/>
+	</node>
+	<!-- =================================== -->
+
+	<node pkg="nodelet" type="nodelet" name="scan_assembler_nodelet" args="load mrs_laser_mapping/scan_assembler_nodelet mapping_nodelet" output="screen" >
+		<param name="frame_id" value="/odom"/>
+			<param name="transform_wait_duration"    type="double"   value="0.3" />
+		<param name="use_invalid_points" value="false"/>
+		
+		<param name="filter_shadow_points" value="true"/>
+		<param name="shadow_filter_min_angle" value="10.0"/>
+		<param name="shadow_filter_max_angle" value="170.0"/>
+		<param name="shadow_filter_window" value="3"/>
+		<param name="shadow_filter_neighbors" value="5"/>
+		
+		<param name="edge_filter_min_angle" value="10.0"/>
+		<param name="edge_filter_max_angle" value="170.0"/>
+		<param name="edge_filter_window" value="4"/>
+		<param name="edge_filter_neighbors" value="4"/>
+		
+		<param name="low_band_points_limit" value="80"/>
+		<param name="low_band_filter_frame_id" value="/left_arm_endeffector_link"/>
+		<param name="low_band_filter_radius" value="0.3"/>
+		
+		<param name="cutoff_height" value="2.0"/>
+		
+		<param name="show_markers_of_self_filter" value="true"/>
+		
+		<remap from="~input" to="/scan" />
+		<remap from="~output" to="/scan_assembler_nodelet/assembled_cloud" />
+
+		<rosparam unless="$(arg arms)" command="load" file="$(find spacebot_launch)/config/self_filter_frames.yaml" />
+		<rosparam if="$(arg arms)" command="load" file="$(find spacebot_launch)/config/self_filter_frames_with_arms.yaml" />
+	</node>
+
+	<!-- local mapping -->
+	<node pkg="nodelet" type="nodelet" name="map_nodelet" args="load mrs_laser_mapping/map_nodelet mapping_nodelet" output="screen" >
+		<remap from="~input" to="/scan_assembler_nodelet/assembled_cloud" />
+		
+		<!-- frame id in which the scanlines are assembled -->
+	  <param name="scan_assembler_frame_id" type="str" value="/odom" />
+		
+		<!-- frame id of the sensor (for raytracing) -->	
+		<param name="sensor_frame_id" type="str" value="/laser_scanner_center" />
+			
+		<!-- add first n scans to the map without registration (e.g. if robot is standing) -->
+	  <param name="min_scans_registration" type="int" value="0" />
+	  
+	  <!-- first n local maps are not published to the global mapping (to avoid sparse maps in alloc. map) -->
+		<param name="min_scans_for_map_publishing" type="int" value="8" />
+		
+		<!-- duration in seconds for waiting for a transform  -->
+		<param name="transform_wait_duration" type="double" value="0.2" />
+
+		<!-- parameters for registration -->
+		<param name="registration_max_iterations" type="int" value="100" />
+		<param name="registration_prior_prob" type="double" value="0.25" />
+		<param name="registration_soft_assoc_c1" type="double" value="0.9" />
+		<param name="registration_soft_assoc_c2" type="int" value="10" />
+		<param name="registration_sigma_size_factor" type="double" value="0.45" /> 
+
+		<!-- parameters for the local map -->
+		<param name="map_size" type="int" value="32" />
+		<param name="map_resolution" type="double" value="20.0" />
+		<param name="map_levels" type="int" value="4" />
+		<param name="map_cell_capacity" type="int" value="1000" />
+		
+		<!-- parameters for downsampled map (for visualization) -->
+		<param name="map_downsampled_size" type="int" value="8" />
+		<param name="map_downsampled_resolution" type="double" value="20.0" />
+		<param name="map_downsampled_levels" type="int" value="4" />
+		<param name="map_downsampled_cell_capacity" type="int" value="100" />
+		
+		<!-- add scans when troso is rotated. Set to false if torso rotation results in artifacts. Default: true-->
+		<param name="add_scans_when_torso_rotated" type="bool" value="false" />
+		
+		<param name="decrease_rate" type="double" value="0.0" />
+	</node>
+	
+<group if="0">
+	<!-- ========= SLAM =========  -->
+	<node pkg="nodelet" type="nodelet" name="slam_nodelet" args="load mrs_laser_mapping/slam_nodelet mapping_nodelet" output="screen" >
+		<remap from="~map" to="/multires_map" />
+		<remap from="~pose_update" to="/localization_pose_control_node/pose" />
+
+		<!-- parameters for the registration method -->
+		<param name="max_iter"                                                 type="int"              value="100" />
+		<param name="prior_prob"                                               type="double"   value="0.25" />
+		<param name="soft_assoc_c1"                                     type="double"   value="0.9" />
+		<param name="soft_assoc_c2"                                     type="int"              value="10" />
+		<param name="sigma_size_factor"                                 type="double"   value="0.45" /> 
+
+		<param name="pose_is_close_dist"                                               type="double"   value="1.5" />
+		<param name="pose_is_close_angle"                                     type="double"   value="0.5" />
+		<param name="pose_is_far_dist"                                               type="double"   value="2.0" />
+
+		<param name="height_image_size_x"                                               type="double"   value="20.0" />
+		<param name="height_image_size_y"                                               type="double"   value="20.0" />
+
+		<param name="height_image_min_z"                                               type="double"   value="0.0" />
+		<param name="height_image_max_z"                                               type="double"   value="2.0" />
+		
+	</node>
+	
+	<node pkg="nodelet" type="nodelet" name="slam_visualizer_nodelet" args="load mrs_laser_mapping/slam_visualizer_nodelet mapping_nodelet" output="screen" >
+		<remap from="~keyframe_transforms" to="/slam_nodelet/keyframe_transforms" />
+		<remap from="~keyframes" to="/slam_nodelet/keyframes" />
+		<param name="voxel_leaf_size"                                               type="double"   value="0.05" />
+
+		<param name="height_image_size_x"                                               type="double"   value="20.0" />
+		<param name="height_image_size_y"                                               type="double"   value="20.0" />
+
+		<param name="height_image_min_z"                                               type="double"   value="0.0" />
+		<param name="height_image_max_z"                                               type="double"   value="2.0" />
+		
+	</node>
+	</group>
+	<node pkg="mrs_laser_mapping" type="localization_pose_control_node" name="localization_pose_control_node" output="screen" />
+
+	  <node name="map_client" pkg="sb_map_management" type="map_client" output="screen">
+                <param name="registration_frame" value="world_corrected_slam" />
+                <param name="map_frame" value="map" />
+
+                <remap from="~cloud" to="/scan_assembler_nodelet/assembled_cloud" />
+                <remap from="~map_cloud" to="/map_cloud" />
+        </node>
+	<include file="$(find spacebot_launch)/maps/height_map.launch" />
+
+</launch>
+		

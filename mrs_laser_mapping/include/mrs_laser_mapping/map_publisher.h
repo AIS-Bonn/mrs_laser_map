@@ -43,7 +43,7 @@
 #include <sensor_msgs/PointCloud2.h>
 
 #include <mrs_laser_maps/map_multiresolution.h>
-#include <mrs_laser_mapping/MultiResolutionMap.h>
+#include <mrs_laser_mapping/MultiResolutionMapMsg.h>
 #include <mrs_laser_mapping/color_utils.h>
 
 
@@ -65,7 +65,7 @@ public:
   void publishCellsWithOccupancy(const boost::shared_ptr<MapType>& map);
 
   template <typename PointType, typename MapType>
-  void publishMap(const boost::shared_ptr<MapType>& map);
+  void publishMap(const boost::shared_ptr<MapType>& map, bool distorted = false);
 
   template <typename PointType, typename MapType>
   void publishMapLevelColor(const boost::shared_ptr<MapType>& map);
@@ -82,6 +82,18 @@ private:
   ros::Publisher pub_cloud_level_color_;
   ros::Publisher pub_cloud_scan_color_;
 };
+
+// template <>
+//  void MapPublisher::publishMapLevelColor<pcl::PointXYZ, mrs_laser_maps::MultiResolutionalMap<pcl::PointXYZ>>(const boost::shared_ptr<mrs_laser_maps::MultiResolutionalMap<pcl::PointXYZ>>& map)
+// {
+// }
+// 
+// template <>
+//  void MapPublisher::publishMapScanColor<pcl::PointXYZ, mrs_laser_maps::MultiResolutionalMap<pcl::PointXYZ>>(const boost::shared_ptr<mrs_laser_maps::MultiResolutionalMap<pcl::PointXYZ>>& map)
+// {
+// }
+// 
+
 }
 
 #include <mrs_laser_mapping/impl/map_publisher.hpp>

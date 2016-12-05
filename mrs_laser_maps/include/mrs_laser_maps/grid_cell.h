@@ -42,7 +42,7 @@
 #include <pcl_ros/point_cloud.h>
 #include <pcl/point_types.h>
 
-//#include <mrs_laser_maps/cell_buffer.h>
+#include <mrs_laser_maps/cell_buffer.h>
 
 //#define DEBUG_CELL_HITS
 
@@ -109,6 +109,7 @@ public:
   {
     points_->push_front(p);
 #ifdef DEBUG_CELL_HITS
+    
     hits_++;
 #endif
   }
@@ -122,6 +123,14 @@ public:
     it = points_->erase(it);
   }
 
+  virtual void clearCell()
+  {
+    points_->clear();
+    occupancy_ = 0.5f;
+    is_end_point_ = false;
+    debug_state_ = UNINITIALIZED;
+  }
+  
   virtual const boost::shared_ptr<BufferType> &getPoints()
   {
     return points_;
@@ -154,20 +163,21 @@ protected:
 
 #ifdef DEBUG_CELL_HITS
   int hits_;
+  std::map<unsigned int, bool> ids_in_evaluate_;
 #endif
 
 private:
 };
 
 
-//template <>
-//inline void GridCell<PointXYZRGBScanLabel, mrs_laser_maps::cell_buffer<PointXYZRGBScanLabel>>::addPoint(const boost::shared_ptr<PointXYZRGBScanLabel>& p)
-//  {
-//    points_->push_front(p);
-//#ifdef DEBUG_CELL_HITS
-//    hits_++;
-//#endif
-//  }
+template <>
+inline void GridCell<PointXYZRGBScanLabel, mrs_laser_maps::cell_buffer<PointXYZRGBScanLabel>>::addPoint(const boost::shared_ptr<PointXYZRGBScanLabel>& p)
+  {
+    points_->push_front(p);
+#ifdef DEBUG_CELL_HITS
+    hits_++;
+#endif
+  }
   
 // template <>
 // void GridCell<PointXYZRGBScanLabel, boost::circular_buffer_space_optimized<boost::shared_ptr<PointXYZRGBScanLabel>>>::addPoint(const PointXYZRGBScanLabel& p)

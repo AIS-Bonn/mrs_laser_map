@@ -117,7 +117,7 @@ public:
   bool poseIsClose(const Eigen::Matrix4d& transform);
   bool poseIsFar(const Eigen::Matrix4d& transform);
 
-  bool update(MapPtr view);
+  bool update(MapPtr view, bool localize_only = false);
   bool setPose(const Eigen::Matrix4d& pose_update);
 
   void connectClosePoses(bool random = false);
@@ -126,6 +126,28 @@ public:
   void refine(unsigned int refineIterations, unsigned int optimizeIterations, float register_start_resolution,
               float register_stop_resolution);
 
+  void lock()
+  {
+    graph_mutex_.lock();
+    
+  }
+  
+  void unlock()
+  {
+    graph_mutex_.unlock();
+    
+  }
+  
+  boost::mutex& getMutex()
+  {
+    return graph_mutex_;
+  }
+  
+  ros::Time getLastUpdateTimestamp()
+  {
+    return last_update_;
+  }
+  
   void dumpError();
 
   g2o::SparseOptimizer* optimizer_;
@@ -148,7 +170,11 @@ public:
   Eigen::Matrix4d last_transform_;
 
 
+  ros::Time last_update_; 
+  
   mrs_laser_maps::MultiResolutionSurfelRegistration surfel_registration_;
+
+  boost::mutex graph_mutex_;
   
 public:
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW;

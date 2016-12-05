@@ -41,6 +41,17 @@
 #include <pcl/point_types.h>
 #include <pcl/point_cloud.h>
 #include <pcl/io/pcd_io.h>
+#include <pcl/visualization/point_cloud_color_handlers.h>
+#include <pcl/visualization/impl/point_cloud_color_handlers.hpp>
+
+
+#include <pcl/visualization/point_cloud_geometry_handlers.h>
+#include <pcl/visualization/impl/point_cloud_geometry_handlers.hpp>
+
+
+#include <pcl/visualization/pcl_visualizer.h>
+#include <pcl/visualization/impl/pcl_visualizer.hpp>
+
 
 #include <boost/make_shared.hpp>
 #include <boost/circular_buffer_fwd.hpp>
@@ -50,25 +61,28 @@ struct PointXYZRGBScanLabel
   PCL_ADD_POINT4D;  // preferred way of adding a XYZ+padding
   uint16_t scanlineNr;
   uint16_t scanNr;
+  uint16_t scannerNr;
   uint32_t pointNr;
+  float distance;
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW  // make sure our new allocators are aligned
 } EIGEN_ALIGN16;                   // enforce SSE padding for correct memory alignment
 
 POINT_CLOUD_REGISTER_POINT_STRUCT(PointXYZRGBScanLabel,
                                   (float, x, x)(float, y, y)(float, z, z)(uint16_t, scanlineNr, scanlineNr)
-				  (uint16_t, scanNr, scanNr)(uint32_t, pointNr, pointNr))
+				  (uint16_t, scanNr, scanNr)(uint16_t, scannerNr, scannerNr)(uint32_t, pointNr, pointNr)(float, distance, distance))
 
 struct PointXYZScanLine
 {
   PCL_ADD_POINT4D;  // preferred way of adding a XYZ+padding
   uint16_t scanlineNr;
+  uint16_t scannerNr;
   uint32_t pointNr;
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW  // make sure our new allocators are aligned
 } EIGEN_ALIGN16;                   // enforce SSE padding for correct memory alignment
 
 POINT_CLOUD_REGISTER_POINT_STRUCT(PointXYZScanLine,
                                   (float, x, x)(float, y, y)(float, z, z)(uint16_t, scanlineNr,
-                                                                          scanlineNr)(uint32_t, pointNr, pointNr))
+                                                                          scanlineNr)(uint16_t, scannerNr, scannerNr)(uint32_t, pointNr, pointNr))
 
 
 
